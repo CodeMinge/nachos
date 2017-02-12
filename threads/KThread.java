@@ -47,6 +47,8 @@ public class KThread {
 	    tcb = new TCB();
 	}	    
 	else {
+		waitJoinQueue = ThreadedKernel.scheduler.newThreadQueue(true); // 初识化，方法与创建全局就绪队列一致
+		
 	    readyQueue = ThreadedKernel.scheduler.newThreadQueue(false);
 	    readyQueue.acquire(this);	    
 
@@ -182,19 +184,24 @@ public class KThread {
      * delete this thread.
      */
     public static void finish() {
-	Lib.debug(dbgThread, "Finishing thread: " + currentThread.toString());
+    	Lib.debug(dbgThread, "Finishing thread: " + currentThread.toString());
 	
-	Machine.interrupt().disable();
+    	Machine.interrupt().disable();
 
-	Machine.autoGrader().finishingCurrentThread();
+    	Machine.autoGrader().finishingCurrentThread();
 
-	Lib.assertTrue(toBeDestroyed == null);
-	toBeDestroyed = currentThread;
-
-
-	currentThread.status = statusFinished;
+    	Lib.assertTrue(toBeDestroyed == null);
+    	toBeDestroyed = currentThread;
+    	currentThread.status = statusFinished;
 	
-	sleep();
+    	//唤醒等待队列的所有线程 
+    	KThread waitThread = currentThread.waitJoinQueue.nextThread();
+    	while(waitThread != null) {
+    		waitThread.ready();
+    		waitThread = currentThread.waitJoinQueue.nextThread();
+    	}
+	
+    	sleep();
     }
 
     /**
@@ -273,9 +280,22 @@ public class KThread {
      * thread.
      */
     public void join() {
-	Lib.debug(dbgThread, "Joining to thread: " + toString());
+    	Lib.debug(dbgThread, "Joining to thread: " + toString());
 
-	Lib.assertTrue(this != currentThread);
+    	Lib.assertTrue(this != currentThread);
+    	
+    	Lib.assertTrue(joinCounter == 0);
+    	joinCounter ++;
+    	
+    	boolean intStatus = Machine.interrupt().disabled(); //系统关中断
+    	
+    	if(this.status != statusFinished) {
+    		System.out.println(this.getName() + " in join " + currentThread.getName());
+    		waitJoinQueue.waitForAccess(currentThread);
+    		currentThread.sleep();
+    	}
+    	
+    	Machine.interrupt().restore(intStatus);
 
     }
 
@@ -415,6 +435,17 @@ public class KThread {
      * @see	nachos.threads.PriorityScheduler.ThreadState
      */
     public Object schedulingState = null;
+    
+    /**
+     * waitJoinQueue，阻塞队列
+     * 每一个线程都存在一条，用于保存等待该线程结束的线程
+     */
+    public ThreadQueue waitJoinQueue = null; 
+    
+    /**
+     * 对join函数调用的计数，只能是被调用一次
+     */
+    public static int joinCounter = 0;
 
     private static final int statusNew = 0;
     private static final int statusReady = 1;

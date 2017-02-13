@@ -21,7 +21,8 @@ public class Condition2 {
      *				<tt>wake()</tt>, or <tt>wakeAll()</tt>.
      */
     public Condition2(Lock conditionLock) {
-	this.conditionLock = conditionLock;
+    	this.conditionLock = conditionLock;
+    	waitQueue = ThreadedKernel.scheduler.newThreadQueue(true);
     }
 
     /**
@@ -31,11 +32,19 @@ public class Condition2 {
      * automatically reacquire the lock before <tt>sleep()</tt> returns.
      */
     public void sleep() {
-	Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+    	Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+    	
+    	boolean intStatus = Machine.interrupt().disable();
 
-	conditionLock.release();
+    	conditionLock.release();
+    	
+    	KThread thread = KThread.currentThread();
+    	waitQueue.waitForAccess(thread);
+    	thread.sleep();
 
-	conditionLock.acquire();
+    	conditionLock.acquire();
+    	
+    	Machine.interrupt().restore(intStatus);
     }
 
     /**
@@ -43,7 +52,15 @@ public class Condition2 {
      * current thread must hold the associated lock.
      */
     public void wake() {
-	Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+    	Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+    	
+    	boolean intStatus = Machine.interrupt().disable();
+    	
+    	KThread thread = waitQueue.nextThread();
+    	if (thread != null)
+    		thread.ready();
+    	
+    	Machine.interrupt().restore(intStatus);
     }
 
     /**
@@ -51,8 +68,19 @@ public class Condition2 {
      * thread must hold the associated lock.
      */
     public void wakeAll() {
-	Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+    	Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+    	
+    	boolean intStatus = Machine.interrupt().disable();
+    	
+    	KThread thread = waitQueue.nextThread();
+    	if (thread != null) {
+    		thread.ready();
+    		thread = waitQueue.nextThread();
+    	}
+    		    	
+    	Machine.interrupt().restore(intStatus);
     }
 
     private Lock conditionLock;
+    private ThreadQueue waitQueue;
 }

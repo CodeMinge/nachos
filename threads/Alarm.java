@@ -1,5 +1,6 @@
 package nachos.threads;
 
+import java.util.*;
 import nachos.machine.*;
 
 /**
@@ -27,7 +28,16 @@ public class Alarm {
      * that should be run.
      */
     public void timerInterrupt() {
-	KThread.currentThread().yield();
+    	AlarmWait alarmWait = null;
+    	for(int i = 0; i < alarmWaitQueue.size(); i ++) {
+    		if(Machine.timer().getTime() >= alarmWaitQueue.get(i).wakeTime) {
+    			alarmWait = alarmWaitQueue.remove(i);
+    			System.out.println("唤醒线程："+alarmWait.thread.getName()+
+    					"，时间为："+Machine.timer().getTime());
+    			alarmWait.thread.ready();
+    		}
+    	}
+    	KThread.currentThread().yield();
     }
 
     /**
@@ -45,9 +55,44 @@ public class Alarm {
      * @see	nachos.machine.Timer#getTime()
      */
     public void waitUntil(long x) {
-	// for now, cheat just to get something working (busy waiting is bad)
-	long wakeTime = Machine.timer().getTime() + x;
-	while (wakeTime > Machine.timer().getTime())
-	    KThread.yield();
+    	long wakeTime = Machine.timer().getTime() + x; //等待时间
+    	
+    	boolean intStatus = Machine.interrupt().disable();
+    	AlarmWait alarmWait = new AlarmWait(KThread.currentThread(), wakeTime);
+    	alarmWaitQueue.add(alarmWait);
+    	System.out.println(KThread.currentThread().getName() +
+    			"线程休眠，时间为："+Machine.timer().getTime()+",应在"+wakeTime+"醒来.");
+    	KThread.sleep();
+    	Machine.interrupt().restore(intStatus);
+	}
+    
+    private LinkedList<AlarmWait> alarmWaitQueue = new LinkedList<AlarmWait>(); //闹钟等待队列
+    
+    private class AlarmWait {
+    	AlarmWait(KThread thread, long wakeTime) {
+    		this.thread = thread;
+    		this.wakeTime = wakeTime;
+    	}
+    	
+    	/* 这些方法暂时用不上
+    	public KThread getThread() {
+    		return thread;
+    	}
+    	
+    	public long getWakeTime() {
+    		return wakeTime;
+    	}
+    	
+    	public void setThread(KThread thread) {
+    		this.thread = thread;
+    	}
+    	
+    	public void setWakeTime(long wakeTime) {
+    		this.wakeTime = wakeTime;
+    	}
+    	*/
+    	
+    	private KThread thread;
+    	private long wakeTime;
     }
 }

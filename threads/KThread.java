@@ -55,11 +55,11 @@ public class KThread {
 	 * create an idle thread as well.
 	 */
 	public KThread() {
+		boolean status = Machine.interrupt().disable();
+
 		if (currentThread != null) {
 			tcb = new TCB();
 		} else {
-			waitJoinQueue = ThreadedKernel.scheduler.newThreadQueue(true); // 初识化，方法与创建全局就绪队列一致
-
 			readyQueue = ThreadedKernel.scheduler.newThreadQueue(false);
 			readyQueue.acquire(this);
 
@@ -70,6 +70,8 @@ public class KThread {
 
 			createIdleThread();
 		}
+		waitJoinQueue.acquire(this);
+		Machine.interrupt().restore(status);
 	}
 
 	/**
@@ -233,12 +235,12 @@ public class KThread {
 		Lib.assertTrue(toBeDestroyed == null);
 		toBeDestroyed = currentThread;
 		currentThread.status = statusFinished;
-
+		
 		// 唤醒等待队列的所有线程
 		KThread waitThread = currentThread.waitJoinQueue.nextThread();
 		while (waitThread != null) {
 			waitThread.ready();
-			waitThread = currentThread.waitJoinQueue.nextThread();
+			//waitThread = currentThread.waitJoinQueue.nextThread();
 		}
 
 		sleep();
@@ -330,12 +332,10 @@ public class KThread {
 
 		if (this.status != statusFinished) {
 			System.out.println(this.getName() + " in join " + currentThread.getName());
-			waitJoinQueue.waitForAccess(currentThread);
+			waitJoinQueue.waitForAccess(KThread.currentThread());
 			currentThread.sleep();
 		}
-
 		Machine.interrupt().restore(intStatus);
-
 	}
 
 	/**
@@ -465,6 +465,23 @@ public class KThread {
 
 		new KThread(new PingTest(1)).setName("forked thread").fork();
 		new PingTest(0).run();
+		
+		//joinTest();
+	}
+	
+	// 有bug
+	public static void joinTest() {
+		Lib.debug(dbgThread, "Enter KThread.selfTest");
+		System.out.println("______join test begin_____");
+		final KThread thread1 = new KThread(new PingTest(1));
+		thread1.setName("forked thread").fork();
+		new KThread(new Runnable() {    	
+			public void run() {  
+				thread1.join();     
+				currentThread.yield();
+				System.out.println("successful");
+				}     
+		}).fork();
 	}
 
 	private static final char dbgThread = 't';
@@ -479,7 +496,7 @@ public class KThread {
 	/**
 	 * waitJoinQueue，阻塞队列 每一个线程都存在一条，用于保存等待该线程结束的线程
 	 */
-	public ThreadQueue waitJoinQueue = null;
+	public ThreadQueue waitJoinQueue = ThreadedKernel.scheduler.newThreadQueue(true); 
 
 	/**
 	 * 对join函数调用的计数，只能是被调用一次

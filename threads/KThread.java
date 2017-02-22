@@ -121,9 +121,10 @@ public class KThread {
 	public String getName() {
 		return name;
 	}
-	
+
 	/**
 	 * 当内核的调度算法为优先级调度时，可使用
+	 * 
 	 * @param priority
 	 */
 	public void setPriority(int priority) {
@@ -131,25 +132,26 @@ public class KThread {
 		ThreadedKernel.scheduler.setPriority(this, priority);
 		Machine.interrupt().restore(status);
 	}
-	
+
 	/**
 	 * 当内核的调度算法为优先级调度时，可使用
+	 * 
 	 * @return
 	 */
 	public int getPriority() {
 		ThreadState ts = (ThreadState) this.schedulingState;
-		
+
 		return ts.priority;
 	}
-	
+
 	/**
 	 * 
 	 * @return
 	 */
-	public int getStatus(){   
-		return status;  
+	public int getStatus() {
+		return status;
 	}
-	
+
 	/**
 	 * Get the full name of this thread. This includes its name along with its
 	 * numerical ID. This name is used for debugging purposes only.
@@ -235,12 +237,12 @@ public class KThread {
 		Lib.assertTrue(toBeDestroyed == null);
 		toBeDestroyed = currentThread;
 		currentThread.status = statusFinished;
-		
+
 		// 唤醒等待队列的所有线程
 		KThread waitThread = currentThread.waitJoinQueue.nextThread();
 		while (waitThread != null) {
 			waitThread.ready();
-			//waitThread = currentThread.waitJoinQueue.nextThread();
+			// waitThread = currentThread.waitJoinQueue.nextThread();
 		}
 
 		sleep();
@@ -463,25 +465,153 @@ public class KThread {
 	public static void selfTest() {
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
 
-		new KThread(new PingTest(1)).setName("forked thread").fork();
-		new PingTest(0).run();
-		
-		//joinTest();
+		// new KThread(new PingTest(1)).setName("forked thread").fork();
+		// new PingTest(0).run();
+
+		// joinTest();
+		// condition2Test();
+		// alarmTest();
+		 communicatorTest();
+		// boatTest();
+		//schedulertest();
 	}
-	
+
 	// 有bug
 	public static void joinTest() {
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
 		System.out.println("______join test begin_____");
 		final KThread thread1 = new KThread(new PingTest(1));
 		thread1.setName("forked thread").fork();
-		new KThread(new Runnable() {    	
-			public void run() {  
-				thread1.join();     
+		new KThread(new Runnable() {
+			public void run() {
+				thread1.join();
 				currentThread.yield();
 				System.out.println("successful");
-				}     
+			}
 		}).fork();
+	}
+
+	public static void condition2Test() {// 检测Condition2是否工作正常
+		Lib.debug(dbgThread, "Enter KThread.selfTest");
+		System.out.println("______Condition2 test begin_____");
+		final Lock lock = new Lock();
+		final Condition2 condition2 = new Condition2(lock);
+		new KThread(new Runnable() {
+			public void run() {
+				lock.acquire();// 线程执行之前获得锁
+				KThread.currentThread().yield();
+				condition2.sleep();
+				System.out.println("thread1 executing");
+				condition2.wake();
+				lock.release();// 线程执行完毕将锁释放
+				System.out.println("thread1 execute successful");
+			}
+		}).fork();
+		new KThread(new Runnable() {
+			public void run() {
+				lock.acquire();// 线程执行之前获得锁
+				KThread.currentThread().yield();
+				condition2.wake();
+				System.out.println("thread2 executing");
+				condition2.sleep();
+				lock.release();// 线程执行完毕将锁释放
+			}
+		}).fork();
+	}
+
+	public static void alarmTest() {// 检测alarm是否工作正常
+		new KThread(new Runnable() {
+			public void run() {
+				System.out.println("______alarm test begin_____");
+				System.out.println(Machine.timer().getTime());
+				ThreadedKernel.alarm.waitUntil(500);
+				System.out.println(Machine.timer().getTime());
+				System.out.println("alarm executing");
+			}
+		}).fork();
+	}
+
+	// 有bug
+	public static void communicatorTest() {// 检测Communicator是否工作正常
+		Lib.debug(dbgThread, "Enter KThread.selfTest");
+		System.out.println("______Communicator test begin_____");
+		final Communicator communicator = new Communicator();
+		new KThread(new Runnable() {
+			public void run() {
+				communicator.speak(20);
+				System.out.println("thread1 successful");
+			}
+		}).fork();
+		new KThread(new Runnable() {
+			public void run() {
+				communicator.speak(30);
+				System.out.println("thread2 successful");
+			}
+		}).fork();
+		new KThread(new Runnable() {
+			public void run() {
+				System.out.println(communicator.listen());
+				System.out.println("thread3 successful");
+			}
+		}).fork();
+		new KThread(new Runnable() {
+			public void run() {
+				System.out.println(communicator.listen());
+				System.out.println("thread4 successful");
+			}
+		}).fork();
+	}
+
+	// 有bug
+	public static void boatTest() {// 检测Boat是否工作正常
+		Lib.debug(dbgThread, "Enter KThread.selfTest");
+		System.out.println("______Boat testbegin_____");
+		new KThread(new Runnable() {
+			public void run() {
+				Boat.selfTest();
+				System.out.println("successful");
+			}
+		}).fork();
+	}
+
+	// 有bug
+	public static void schedulertest() {
+		KThread thread1 = new KThread(new Runnable() {
+			public void run() {
+				for (int i = 0; i < 3; i++) {
+					KThread.currentThread().yield();
+					System.out.println("thread1");
+				}
+			}
+		});
+		KThread thread2 = new KThread(new Runnable() {
+			public void run() {
+				for (int i = 0; i < 3; i++) {
+					KThread.currentThread().yield();
+					System.out.println("thread2");
+				}
+			}
+		});
+		KThread thread3 = new KThread(new Runnable() {
+			public void run() {
+				//thread1.join();
+				for (int i = 0; i < 3; i++) {
+					KThread.currentThread().yield();
+					System.out.println("thread3");
+				}
+			}
+		});
+		boolean status = Machine.interrupt().disable();
+		ThreadedKernel.scheduler.setPriority(thread1, 2);
+		ThreadedKernel.scheduler.setPriority(thread2, 4);
+		ThreadedKernel.scheduler.setPriority(thread3, 6);
+		thread1.setName("thread111");
+		thread2.setName("thread2222");
+		thread3.setName("thread33333");
+		Machine.interrupt().restore(status);
+		thread1.fork();
+		thread2.fork();
+		thread3.fork();
 	}
 
 	private static final char dbgThread = 't';
@@ -496,7 +626,7 @@ public class KThread {
 	/**
 	 * waitJoinQueue，阻塞队列 每一个线程都存在一条，用于保存等待该线程结束的线程
 	 */
-	public ThreadQueue waitJoinQueue = ThreadedKernel.scheduler.newThreadQueue(true); 
+	public ThreadQueue waitJoinQueue = ThreadedKernel.scheduler.newThreadQueue(true);
 
 	/**
 	 * 对join函数调用的计数，只能是被调用一次

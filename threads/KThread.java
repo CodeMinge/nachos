@@ -56,7 +56,7 @@ public class KThread {
 	 */
 	public KThread() {
 		boolean status = Machine.interrupt().disable();
-
+		
 		if (currentThread != null) {
 			tcb = new TCB();
 		} else {
@@ -234,15 +234,16 @@ public class KThread {
 
 		Machine.autoGrader().finishingCurrentThread();
 
+		//表明当前线程要结束了
 		Lib.assertTrue(toBeDestroyed == null);
-		toBeDestroyed = currentThread;
+		toBeDestroyed = currentThread; 
 		currentThread.status = statusFinished;
 
 		// 唤醒等待队列的所有线程
-		KThread waitThread = currentThread.waitJoinQueue.nextThread();
+		KThread waitThread = currentThread().waitJoinQueue.nextThread();
 		while (waitThread != null) {
 			waitThread.ready();
-			// waitThread = currentThread.waitJoinQueue.nextThread();
+			waitThread = currentThread.waitJoinQueue.nextThread();
 		}
 
 		sleep();
@@ -325,18 +326,25 @@ public class KThread {
 	public void join() {
 		Lib.debug(dbgThread, "Joining to thread: " + toString());
 
-		Lib.assertTrue(this != currentThread);
+		Lib.assertTrue(this != currentThread); //已实现线程只能调用一次join()方法
 
-		Lib.assertTrue(joinCounter == 0);
-		joinCounter++;
+		//Lib.assertTrue(joinCounter == 0);
+		//joinCounter++;
+		
+		if(this.status == statusFinished)
+			return;
 
-		boolean intStatus = Machine.interrupt().disabled(); // 系统关中断
-
-		if (this.status != statusFinished) {
-			System.out.println(this.getName() + " in join " + currentThread.getName());
-			waitJoinQueue.waitForAccess(KThread.currentThread());
-			currentThread.sleep();
+		boolean intStatus = Machine.interrupt().disable(); // 系统关中断
+		
+		if(waitJoinQueue == null) {
+			waitJoinQueue = ThreadedKernel.scheduler.newThreadQueue(true);
+			waitJoinQueue.acquire(this);
 		}
+
+		System.out.println(this.getName() + " in join " + currentThread.getName());
+		waitJoinQueue.waitForAccess(currentThread);
+		KThread.sleep(); //当前进程睡眠等待被调用进程结束
+		
 		Machine.interrupt().restore(intStatus);
 	}
 
@@ -468,15 +476,14 @@ public class KThread {
 		// new KThread(new PingTest(1)).setName("forked thread").fork();
 		// new PingTest(0).run();
 
-		// joinTest();
+		//joinTest();
 		// condition2Test();
 		// alarmTest();
-		 communicatorTest();
-		// boatTest();
+		// communicatorTest();
+		 boatTest();
 		//schedulertest();
 	}
-
-	// 有bug
+	
 	public static void joinTest() {
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
 		System.out.println("______join test begin_____");
@@ -530,8 +537,7 @@ public class KThread {
 			}
 		}).fork();
 	}
-
-	// 有bug
+	
 	public static void communicatorTest() {// 检测Communicator是否工作正常
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
 		System.out.println("______Communicator test begin_____");
@@ -631,7 +637,7 @@ public class KThread {
 	/**
 	 * 对join函数调用的计数，只能是被调用一次
 	 */
-	public static int joinCounter = 0;
+	//public static int joinCounter = 0;
 
 	private static final int statusNew = 0;
 	private static final int statusReady = 1;

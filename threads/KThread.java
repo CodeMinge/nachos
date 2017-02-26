@@ -480,8 +480,8 @@ public class KThread {
 		// condition2Test();
 		// alarmTest();
 		// communicatorTest();
-		 boatTest();
-		//schedulertest();
+		// boatTest();
+		schedulertest();
 	}
 	
 	public static void joinTest() {
@@ -568,7 +568,6 @@ public class KThread {
 		}).fork();
 	}
 
-	// 有bug
 	public static void boatTest() {// 检测Boat是否工作正常
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
 		System.out.println("______Boat testbegin_____");
@@ -580,9 +579,8 @@ public class KThread {
 		}).fork();
 	}
 
-	// 有bug
 	public static void schedulertest() {
-		KThread thread1 = new KThread(new Runnable() {
+		final KThread thread1 = new KThread(new Runnable() {
 			public void run() {
 				for (int i = 0; i < 3; i++) {
 					KThread.currentThread().yield();
@@ -600,7 +598,7 @@ public class KThread {
 		});
 		KThread thread3 = new KThread(new Runnable() {
 			public void run() {
-				//thread1.join();
+				thread1.join();
 				for (int i = 0; i < 3; i++) {
 					KThread.currentThread().yield();
 					System.out.println("thread3");

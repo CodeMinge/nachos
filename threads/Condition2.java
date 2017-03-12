@@ -35,13 +35,10 @@ public class Condition2 {
     	Lib.assertTrue(conditionLock.isHeldByCurrentThread());
     	
     	boolean intStatus = Machine.interrupt().disable();
-
-    	conditionLock.release();
     	
-    	KThread thread = KThread.currentThread();
-    	waitQueue.waitForAccess(thread);
-    	thread.sleep();
-
+    	waitQueue.waitForAccess(KThread.currentThread());
+    	conditionLock.release();
+    	KThread.sleep();
     	conditionLock.acquire();
     	
     	Machine.interrupt().restore(intStatus);

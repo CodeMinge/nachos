@@ -143,18 +143,40 @@ public class UserProcess {
 	 * @return the number of bytes successfully transferred.
 	 */
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
+		// 从虚拟内存地址读出到data中
+		// 偏移量与长度都要为正数，偏移量+长度<=总的数据长度
 		Lib.assertTrue(offset >= 0 && length >= 0 && offset + length <= data.length);
+		// getMemory会返回主程序的数组
+		byte[] memory = Machine.processor().getMemory(); // 获得物理数组
+		// 计算剩下的页表字节个数
+		if (length > (pageSize * numPages - vaddr))
+			length = pageSize * numPages - vaddr;
+		// 计算能够传输的数据的大小，如果data数组中存不下length，则减小length（传输字节数）
+		if (data.length - offset < length)
+			length = data.length - offset;
+		// 转换成功的字节数
+		int transferredbyte = 0;
+		do {
+			// 计算页号
+			int pageNum = Processor.pageFromAddress(vaddr + transferredbyte);
+			// 页号大于 页表的长度 或者 为负 是异常情况
+			if (pageNum < 0 || pageNum >= pageTable.length)
+				return 0;
+			// 计算页偏移量
+			int pageOffset = Processor.offsetFromAddress(vaddr + transferredbyte);
+			// 计算剩余页的容量
+			int leftByte = pageSize - pageOffset;
+			// 计算下一次传送的数量:剩余页容量和需要转移的字节数中较小者
+			int amount = Math.min(leftByte, length - transferredbyte);
+			// 计算物理内存的地址
+			int realAddress = pageTable[pageNum].ppn * pageSize + pageOffset;
+			// 将物理内存的东西传输到虚拟内存
+			System.arraycopy(memory, realAddress, data, offset + transferredbyte, amount);
+			// 修改传输成功的字节数
+			transferredbyte = transferredbyte + amount;
+		} while (transferredbyte < length);
 
-		byte[] memory = Machine.processor().getMemory();
-
-		// for now, just assume that virtual addresses equal physical addresses
-		if (vaddr < 0 || vaddr >= memory.length)
-			return 0;
-
-		int amount = Math.min(length, memory.length - vaddr);
-		System.arraycopy(memory, vaddr, data, offset, amount);
-
-		return amount;
+		return transferredbyte;
 	}
 
 	/**
@@ -191,17 +213,42 @@ public class UserProcess {
 	 */
 	public int writeVirtualMemory(int vaddr, byte[] data, int offset, int length) {
 		Lib.assertTrue(offset >= 0 && length >= 0 && offset + length <= data.length);
-
+		// 物理内存
 		byte[] memory = Machine.processor().getMemory();
+		// 写内存的长度如果超过页剩余量
+		if (length > (pageSize * numPages - vaddr))
+			length = pageSize * numPages - vaddr;
+		// 如果数组中要写的长度比给定的小，则给length减为数组剩余的长度
+		if (data.length - offset < length)
+			length = data.length - offset;
+		int transferredbyte = 0;
+		do {
+			// 此函数返回给定地址的页号
+			int pageNum = Processor.pageFromAddress(vaddr + transferredbyte);
+			if (pageNum < 0 || pageNum >= pageTable.length)
+				return 0;
+			// 此函数返回给定地址的页偏移量
+			int pageOffset = Processor.offsetFromAddress(vaddr + transferredbyte);
+			// 页剩余的字节数
+			int leftByte = pageSize - pageOffset;
+			// 设置本次转移的数量
+			int amount = Math.min(leftByte, length - transferredbyte);
+			int realAddress = pageTable[pageNum].ppn * pageSize + pageOffset;
+			// 从虚拟内存写入到物理内存
+			System.arraycopy(data, offset + transferredbyte, memory, realAddress, amount);
+			// 改变写成功的字节数
+			transferredbyte = transferredbyte + amount;
+		} while (transferredbyte < length);
 
+		return transferredbyte;
 		// for now, just assume that virtual addresses equal physical addresses
-		if (vaddr < 0 || vaddr >= memory.length)
-			return 0;
-
-		int amount = Math.min(length, memory.length - vaddr);
-		System.arraycopy(data, offset, memory, vaddr, amount);
-
-		return amount;
+		// if (vaddr < 0 || vaddr >= memory.length)
+		// return 0;
+		//
+		// int amount = Math.min(length, memory.length - vaddr);
+		// System.arraycopy(data, offset, memory, vaddr, amount);
+		//
+		// return amount;
 	}
 
 	/**
@@ -300,34 +347,54 @@ public class UserProcess {
 	 * @return <tt>true</tt> if the sections were successfully loaded.
 	 */
 	protected boolean loadSections() {
+		UserKernel.allocateMemoryLock.acquire();// 获取分配的内存的锁
+		// 进程所需要的页面数已知，保存在numPages中
+		// 判断能否分配内存
+		// numPages中 已经确定了需要页的数量
+		// 页数量如果大于实际物理内存的页数量，则不能加载
 		if (numPages > Machine.processor().getNumPhysPages()) {
+			// 判断能否装载
 			coff.close();
-			Lib.debug(dbgProcess, "\tinsufficient physical memory");
-			return false;
+			// 缺少物理内存（如果程序的页数大于处理器的空闲物理页数就会失败）
+			Lib.debug(dbgProcess, "\t insufficient（缺少物理地址） physical memory");
+			UserKernel.allocateMemoryLock.release();
+			return false;// 返回装载失败
 		}
-
-		// load sections
+		pageTable = new TranslationEntry[numPages];// 实例化页表
+		for (int i = 0; i < numPages; i++) {
+			// 从空闲物理页号链表中拿出一个
+			int nextPage = UserKernel.memoryLinkedList.remove();
+			pageTable[i] = new TranslationEntry(i, nextPage, true, false, false, false);
+		}
+		UserKernel.allocateMemoryLock.release();
+		// load sections（段），一个段是由很多页组成
 		for (int s = 0; s < coff.getNumSections(); s++) {
-			CoffSection section = coff.getSection(s);
-
+			CoffSection section = coff.getSection(s); // coff获得Section
 			Lib.debug(dbgProcess,
 					"\tinitializing " + section.getName() + " section (" + section.getLength() + " pages)");
-
 			for (int i = 0; i < section.getLength(); i++) {
-				int vpn = section.getFirstVPN() + i;
-
+				int vpn = section.getFirstVPN() + i;// 得到每一段虚拟页号（有页号偏移i），section不同
+				pageTable[vpn].readOnly = section.isReadOnly();// 标记为只读
 				// for now, just assume virtual addresses=physical addresses
-				section.loadPage(i, vpn);
+				// 装入物理页
+				section.loadPage(i, pageTable[vpn].ppn);
 			}
 		}
-
 		return true;
 	}
 
 	/**
-	 * Release any resources allocated by <tt>loadSections()</tt>.
+	 * 释放内存 Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
+		UserKernel.allocateMemoryLock.acquire();
+
+		for (int i = 0; i < numPages; i++) {
+			UserKernel.memoryLinkedList.add(pageTable[i].ppn); // 将该用户进程占用的内存加入空闲内存链表中
+			pageTable[i] = null;
+		}
+
+		UserKernel.allocateMemoryLock.release();
 	}
 
 	/**
@@ -650,7 +717,7 @@ public class UserProcess {
 			return handleClose(a0);
 		case syscallUnlink:
 			return handleUnlink(a0);
-		
+
 		default:
 			Lib.debug(dbgProcess, "Unknown syscall " + syscall);
 			Lib.assertNotReached("Unknown system call!");

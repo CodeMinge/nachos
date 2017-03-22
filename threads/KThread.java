@@ -1,6 +1,7 @@
 package nachos.threads;
 
 import nachos.machine.*;
+import nachos.proj1.*;
 import nachos.threads.PriorityScheduler.ThreadState;
 
 /**
@@ -56,7 +57,7 @@ public class KThread {
 	 */
 	public KThread() {
 		boolean status = Machine.interrupt().disable();
-		
+
 		if (currentThread != null) {
 			tcb = new TCB();
 		} else {
@@ -234,9 +235,9 @@ public class KThread {
 
 		Machine.autoGrader().finishingCurrentThread();
 
-		//表明当前线程要结束了
+		// 表明当前线程要结束了
 		Lib.assertTrue(toBeDestroyed == null);
-		toBeDestroyed = currentThread; 
+		toBeDestroyed = currentThread;
 		currentThread.status = statusFinished;
 
 		// 唤醒等待队列的所有线程
@@ -326,25 +327,25 @@ public class KThread {
 	public void join() {
 		Lib.debug(dbgThread, "Joining to thread: " + toString());
 
-		Lib.assertTrue(this != currentThread); //已实现线程只能调用一次join()方法
+		Lib.assertTrue(this != currentThread); // 已实现线程只能调用一次join()方法
 
-		//Lib.assertTrue(joinCounter == 0);
-		//joinCounter++;
-		
-		if(this.status == statusFinished)
+		// Lib.assertTrue(joinCounter == 0);
+		// joinCounter++;
+
+		if (this.status == statusFinished)
 			return;
 
 		boolean intStatus = Machine.interrupt().disable(); // 系统关中断
-		
-		if(waitJoinQueue == null) {
+
+		if (waitJoinQueue == null) {
 			waitJoinQueue = ThreadedKernel.scheduler.newThreadQueue(true);
 			waitJoinQueue.acquire(this);
 		}
 
 		System.out.println(this.getName() + " in join " + currentThread.getName());
 		waitJoinQueue.waitForAccess(currentThread);
-		KThread.sleep(); //当前进程睡眠等待被调用进程结束
-		
+		KThread.sleep(); // 当前进程睡眠等待被调用进程结束
+
 		Machine.interrupt().restore(intStatus);
 	}
 
@@ -476,14 +477,20 @@ public class KThread {
 		// new KThread(new PingTest(1)).setName("forked thread").fork();
 		// new PingTest(0).run();
 
-		//joinTest();
+		// joinTest();
 		// condition2Test();
 		// alarmTest();
 		// communicatorTest();
 		// boatTest();
-		schedulertest();
+		 schedulertest();
+
+		// new Condition2Test().simpleCondition2Test();
+		// new JoinTest().simpleJoinTest();
+		// selfTest_Alarm(1);
+//		new CommunicatorTest().commTest(1);
+//		selftest_PriorityScheduler();
 	}
-	
+
 	public static void joinTest() {
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
 		System.out.println("______join test begin_____");
@@ -506,6 +513,7 @@ public class KThread {
 		new KThread(new Runnable() {
 			public void run() {
 				lock.acquire();// 线程执行之前获得锁
+				// System.out.println("thread1");
 				KThread.currentThread().yield();
 				condition2.sleep();
 				System.out.println("thread1 executing");
@@ -517,13 +525,45 @@ public class KThread {
 		new KThread(new Runnable() {
 			public void run() {
 				lock.acquire();// 线程执行之前获得锁
+				// System.out.println("thread2");
 				KThread.currentThread().yield();
 				condition2.wake();
 				System.out.println("thread2 executing");
 				condition2.sleep();
 				lock.release();// 线程执行完毕将锁释放
+				System.out.println("thread2 execute successful");
 			}
 		}).fork();
+	}
+
+	public static void selfTest_Alarm(int numOfTest) {
+		Runnable a = new Runnable() {
+			public void run() {
+				AlarmTestThread();
+			}
+		};
+		for (int i = 0; i < numOfTest; i++) {
+			int numOfThreads = 5;
+			System.out.println("creating" + numOfThreads + "num of threads");
+			for (int j = 0; j < numOfThreads; j++) {
+				KThread thread = new KThread(a);
+				thread.setName("thread");
+				thread.fork();
+				ThreadedKernel.alarm.waitUntil(30000000);
+			}
+		}
+	}
+
+	static void AlarmTestThread() {
+		long sleepTime = 20000;
+		long timeBeforeSleep = Machine.timer().getTime();
+		ThreadedKernel.alarm.waitUntil(sleepTime);
+		long timeAfterSleep = Machine.timer().getTime();
+		long actualSleepTime = timeAfterSleep - timeBeforeSleep;
+		System.out.println(
+				KThread.currentThread().toString() + "is ask at:" + timeBeforeSleep + "sleep" + sleepTime + "ticks");
+		System.out.println(KThread.currentThread().toString() + "is ask at:" + Machine.timer().getTime()
+				+ "sleep time is" + sleepTime + "ticks, actrully sleep:" + actualSleepTime);
 	}
 
 	public static void alarmTest() {// 检测alarm是否工作正常
@@ -537,7 +577,7 @@ public class KThread {
 			}
 		}).fork();
 	}
-	
+
 	public static void communicatorTest() {// 检测Communicator是否工作正常
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
 		System.out.println("______Communicator test begin_____");
@@ -577,6 +617,50 @@ public class KThread {
 				System.out.println("successful");
 			}
 		}).fork();
+	}
+
+	public static void selftest_PriorityScheduler() {
+		System.out.println("-----PriorityScheduler功能测试-----");
+		final KThread thread1 = new KThread(new Runnable() {
+			public void run() {
+				KThread.yield();
+				System.out.println("线程1正在执行");
+			}
+		});
+		thread1.setName("thread1");
+		KThread thread2 = new KThread(new Runnable() {
+			public void run() {
+				KThread.yield();
+				System.out.println("线程2正在执行");
+			}
+		});
+		thread2.setName("thread2");
+		KThread thread3 = new KThread(new Runnable() {
+			public void run() {
+				thread1.join();
+				KThread.yield();
+				System.out.println("线程3正在执行");
+			}
+		});
+		thread3.setName("thread3");
+
+		KThread thread4 = new KThread(new Runnable() {
+			public void run() {
+				KThread.yield();
+				System.out.println("线程4正在执行");
+			}
+		});
+		thread1.setName("thread4");
+		boolean status = Machine.interrupt().disable();
+		ThreadedKernel.scheduler.setPriority(thread1, 2);
+		ThreadedKernel.scheduler.setPriority(thread2, 1);
+		ThreadedKernel.scheduler.setPriority(thread3, 3);
+		ThreadedKernel.scheduler.setPriority(thread4, 4);
+		Machine.interrupt().restore(status);
+		thread1.fork();
+		thread2.fork();
+		thread3.fork();
+		thread4.fork();
 	}
 
 	public static void schedulertest() {
@@ -635,7 +719,7 @@ public class KThread {
 	/**
 	 * 对join函数调用的计数，只能是被调用一次
 	 */
-	//public static int joinCounter = 0;
+	// public static int joinCounter = 0;
 
 	private static final int statusNew = 0;
 	private static final int statusReady = 1;

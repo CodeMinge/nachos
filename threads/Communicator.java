@@ -76,9 +76,9 @@ public class Communicator {
 			litener.sleep();
 			num_litener--;
 		} else {
-			//这个换个位置为什么就行了？
+			// 这个换个位置为什么就行了？
 			speaker.wake();
-			litener.sleep();	
+			litener.sleep();
 		}
 
 		lock.release();

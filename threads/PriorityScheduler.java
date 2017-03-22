@@ -155,7 +155,7 @@ public class PriorityScheduler extends Scheduler {
 			if (state == null) {
 				return null;
 			} else {
-				return waitQueue.remove(waitQueue.indexOf(state)).thread;
+				return ThreadState_Queue.remove(ThreadState_Queue.indexOf(state)).thread;
 			}
 		}
 
@@ -166,9 +166,9 @@ public class PriorityScheduler extends Scheduler {
 		 * @return the next thread that <tt>nextThread()</tt> would return.
 		 */
 		protected ThreadState pickNextThread() {
-			if (index < waitQueue.size()) {
+			if (index < ThreadState_Queue.size()) {
 				index++;
-				return waitQueue.get(index - 1);
+				return ThreadState_Queue.get(index - 1);
 			}
 
 			return null;
@@ -185,7 +185,7 @@ public class PriorityScheduler extends Scheduler {
 		 */
 		public boolean transferPriority;
 
-		public LinkedList<ThreadState> waitQueue = new LinkedList<ThreadState>();
+		public LinkedList<ThreadState> ThreadState_Queue = new LinkedList<ThreadState>();
 
 		public ThreadState linkedthread = null;
 
@@ -212,7 +212,7 @@ public class PriorityScheduler extends Scheduler {
 
 			setPriority(priorityDefault);
 
-			waitQueue=new PriorityQueue(true);
+			waitQueue = new PriorityQueue(true);
 		}
 
 		/**
@@ -231,7 +231,14 @@ public class PriorityScheduler extends Scheduler {
 		 */
 		public int getEffectivePriority() {
 			// implement me
-			effectivepriority=-1;      for(int i=0;i<waitQueue.waitQueue.size();i++)   {   if(waitQueue.waitQueue.get(i).getEffectivePriority()>effectivepriority)    effectivepriority=waitQueue.waitQueue.get(i).getEffectivePriority();   }   if(effectivepriority>priority)    setPriority(effectivepriority);       return priority;
+			effectivepriority = -1;
+			for (int i = 0; i < waitQueue.ThreadState_Queue.size(); i++) {
+				if (waitQueue.ThreadState_Queue.get(i).getEffectivePriority() > effectivepriority)
+					effectivepriority = waitQueue.ThreadState_Queue.get(i).getEffectivePriority();
+			}
+			if (effectivepriority > priority)
+				setPriority(effectivepriority);// 将最大有效优先级设置为线程本身优先级
+			return priority;
 		}
 
 		/**
@@ -261,10 +268,13 @@ public class PriorityScheduler extends Scheduler {
 		 *
 		 * @see nachos.threads.ThreadQueue#waitForAccess
 		 */
-		public void waitForAccess(PriorityQueue waitQueue) {
+		public void waitForAccess(PriorityQueue waitQueue) {// 将此线程状态存入传入的等待队列
 			// implement me
 
-			waitQueue.waitQueue.add(this);            if(waitQueue.linkedthread!=null&&waitQueue.linkedthread!=this)   {    waitQueue.linkedthread.waitQueue.waitForAccess(this.thread);   }
+			waitQueue.ThreadState_Queue.add(this);
+			if (waitQueue.linkedthread != null && waitQueue.linkedthread != this) {
+				waitQueue.linkedthread.waitQueue.waitForAccess(this.thread);//加入该线程的等待队列
+			}
 		}
 
 		/**
@@ -280,7 +290,7 @@ public class PriorityScheduler extends Scheduler {
 		public void acquire(PriorityQueue waitQueue) {
 			// implement me
 
-			Lib.assertTrue(waitQueue.waitQueue.isEmpty());
+			Lib.assertTrue(waitQueue.ThreadState_Queue.isEmpty());
 			waitQueue.linkedthread = this;
 		}
 

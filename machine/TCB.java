@@ -141,7 +141,7 @@ public final class TCB {
 	 * Context switch between the current TCB and this TCB. This TCB will become
 	 * the new current TCB. It is acceptable for this TCB to be the current TCB.
 	 */
-	public void contextSwitch() {
+	public void contextSwitch() { //线程切换
 		/*
 		 * Probably unnecessary sanity check: we make sure that the current
 		 * thread is bound to the current TCB. This check can only fail if
@@ -215,6 +215,7 @@ public final class TCB {
 		return (currentTCB != null && Thread.currentThread() == currentTCB.javaThread);
 	}
 
+	// 所有线程运行的入口
 	private void threadroot() {
 		// this should be running the current thread
 		Lib.assertTrue(javaThread == Thread.currentThread());

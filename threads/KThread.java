@@ -478,17 +478,17 @@ public class KThread {
 		// new PingTest(0).run();
 
 		// joinTest();
-		// condition2Test();
+//		 condition2Test();
 		// alarmTest();
 		// communicatorTest();
 		// boatTest();
-		 schedulertest();
+//		 schedulertest();
 
-		// new Condition2Test().simpleCondition2Test();
+//		 new Condition2Test().simpleCondition2Test();
 		// new JoinTest().simpleJoinTest();
 		// selfTest_Alarm(1);
 //		new CommunicatorTest().commTest(1);
-//		selftest_PriorityScheduler();
+		selftest_PriorityScheduler();
 	}
 
 	public static void joinTest() {
@@ -510,10 +510,9 @@ public class KThread {
 		System.out.println("______Condition2 test begin_____");
 		final Lock lock = new Lock();
 		final Condition2 condition2 = new Condition2(lock);
-		new KThread(new Runnable() {
+		KThread thread1 = new KThread(new Runnable() {
 			public void run() {
 				lock.acquire();// 线程执行之前获得锁
-				// System.out.println("thread1");
 				KThread.currentThread().yield();
 				condition2.sleep();
 				System.out.println("thread1 executing");
@@ -521,11 +520,10 @@ public class KThread {
 				lock.release();// 线程执行完毕将锁释放
 				System.out.println("thread1 execute successful");
 			}
-		}).fork();
-		new KThread(new Runnable() {
+		});
+		KThread thread2 = new KThread(new Runnable() {
 			public void run() {
 				lock.acquire();// 线程执行之前获得锁
-				// System.out.println("thread2");
 				KThread.currentThread().yield();
 				condition2.wake();
 				System.out.println("thread2 executing");
@@ -533,7 +531,11 @@ public class KThread {
 				lock.release();// 线程执行完毕将锁释放
 				System.out.println("thread2 execute successful");
 			}
-		}).fork();
+		});
+		thread1.setName("thread1");
+		thread2.setName("thread2");
+		thread1.fork();
+		thread2.fork();
 	}
 
 	public static void selfTest_Alarm(int numOfTest) {
@@ -637,8 +639,8 @@ public class KThread {
 		thread2.setName("thread2");
 		KThread thread3 = new KThread(new Runnable() {
 			public void run() {
-				thread1.join();
 				KThread.yield();
+				thread1.join();
 				System.out.println("线程3正在执行");
 			}
 		});
@@ -650,7 +652,7 @@ public class KThread {
 				System.out.println("线程4正在执行");
 			}
 		});
-		thread1.setName("thread4");
+		thread4.setName("thread4");
 		boolean status = Machine.interrupt().disable();
 		ThreadedKernel.scheduler.setPriority(thread1, 2);
 		ThreadedKernel.scheduler.setPriority(thread2, 1);

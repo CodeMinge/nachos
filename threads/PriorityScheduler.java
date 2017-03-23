@@ -140,13 +140,11 @@ public class PriorityScheduler extends Scheduler {
 
 		public KThread nextThread() {
 			Lib.assertTrue(Machine.interrupt().disabled());
-			// implement me
 			int max = -1;
 			index = 0;
 			ThreadState state = null, temp = null;
-
 			while ((temp = pickNextThread()) != null) {
-				if (temp.getEffectivePriority() > max) {
+				if (temp.getEffectivePriority() > max) {// 找出等待队列中的那个最大优先级
 					state = temp;
 					max = temp.getEffectivePriority();
 				}
@@ -155,7 +153,7 @@ public class PriorityScheduler extends Scheduler {
 			if (state == null) {
 				return null;
 			} else {
-				return ThreadState_Queue.remove(ThreadState_Queue.indexOf(state)).thread;
+				return ThreadState_Queue.remove(ThreadState_Queue.indexOf(state)).thread;// 取出等待队列中优先级最大的线程
 			}
 		}
 
@@ -165,12 +163,12 @@ public class PriorityScheduler extends Scheduler {
 		 *
 		 * @return the next thread that <tt>nextThread()</tt> would return.
 		 */
-		protected ThreadState pickNextThread() {
+		protected ThreadState pickNextThread() {// 遍历队列
+
 			if (index < ThreadState_Queue.size()) {
 				index++;
 				return ThreadState_Queue.get(index - 1);
 			}
-
 			return null;
 		}
 
@@ -184,11 +182,8 @@ public class PriorityScheduler extends Scheduler {
 		 * threads to the owning thread.
 		 */
 		public boolean transferPriority;
-
-		public LinkedList<ThreadState> ThreadState_Queue = new LinkedList<ThreadState>();
-
+		public LinkedList<ThreadState> ThreadState_Queue = new LinkedList<ThreadState>();// 该线程join的线程队列
 		public ThreadState linkedthread = null;
-
 		private int index;
 	}
 
@@ -209,9 +204,7 @@ public class PriorityScheduler extends Scheduler {
 		 */
 		public ThreadState(KThread thread) {
 			this.thread = thread;
-
 			setPriority(priorityDefault);
-
 			waitQueue = new PriorityQueue(true);
 		}
 
@@ -229,16 +222,20 @@ public class PriorityScheduler extends Scheduler {
 		 *
 		 * @return the effective priority of the associated thread.
 		 */
-		public int getEffectivePriority() {
+		public int getEffectivePriority() {// 得到有效优先级
 			// implement me
-			effectivepriority = -1;
+
+			effectivepriority = -1;// 初始化一个int
+			// System.out.println("aa"+waitQueue.ThreadState_Queue.size());
 			for (int i = 0; i < waitQueue.ThreadState_Queue.size(); i++) {
 				if (waitQueue.ThreadState_Queue.get(i).getEffectivePriority() > effectivepriority)
 					effectivepriority = waitQueue.ThreadState_Queue.get(i).getEffectivePriority();
 			}
 			if (effectivepriority > priority)
 				setPriority(effectivepriority);// 将最大有效优先级设置为线程本身优先级
+			// System.out.println(priority);
 			return priority;
+
 		}
 
 		/**
@@ -268,12 +265,11 @@ public class PriorityScheduler extends Scheduler {
 		 *
 		 * @see nachos.threads.ThreadQueue#waitForAccess
 		 */
-		public void waitForAccess(PriorityQueue waitQueue) {// 将此线程状态存入传入的等待队列
+		public void waitForAccess(PriorityQueue waitQueue) {
 			// implement me
-
 			waitQueue.ThreadState_Queue.add(this);
 			if (waitQueue.linkedthread != null && waitQueue.linkedthread != this) {
-				waitQueue.linkedthread.waitQueue.waitForAccess(this.thread);//加入该线程的等待队列
+				waitQueue.linkedthread.waitQueue.waitForAccess(this.thread);// 加入该线程的等待队列
 			}
 		}
 
@@ -287,20 +283,19 @@ public class PriorityScheduler extends Scheduler {
 		 * @see nachos.threads.ThreadQueue#acquire
 		 * @see nachos.threads.ThreadQueue#nextThread
 		 */
-		public void acquire(PriorityQueue waitQueue) {
+		public void acquire(PriorityQueue waitQueue) {// 相当于一个线程持有的队列锁
 			// implement me
-
 			Lib.assertTrue(waitQueue.ThreadState_Queue.isEmpty());
 			waitQueue.linkedthread = this;
 		}
 
 		/** The thread with which this object is associated. */
-		protected KThread thread;
+		protected KThread thread;// 这个对象关联的线程
 		/** The priority of the associated thread. */
-		protected int priority;
+		protected int priority;// 关联线程的优先级
 
-		protected int effectivepriority; // 有效优先级
+		protected int effectivepriority;// 有效优先级
 
-		protected PriorityQueue waitQueue;
+		protected PriorityQueue waitQueue;// 等待该线程的线程队列
 	}
 }

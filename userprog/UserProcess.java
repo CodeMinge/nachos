@@ -760,7 +760,7 @@ public class UserProcess {
 
 	public boolean normalExit = false;// 退出状态，是否为正常退出
 
-	public LinkedList<UserProcess> childProcess = new LinkedList();// 所创建的子进程链表
+	public LinkedList<UserProcess> childProcess = new LinkedList<UserProcess>();// 所创建的子进程链表
 	public UserProcess parentProcess = null;// 创建这个进程的父进程
 	private static int numOfProcess = 0;// 进程计数器
 	private static int numOfRunningProcess = 0;// 运行进程计数器

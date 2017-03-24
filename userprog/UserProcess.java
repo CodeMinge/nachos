@@ -2,19 +2,22 @@ package nachos.userprog;
 
 import nachos.machine.*;
 import nachos.threads.*;
+import nachos.userprog.UserKernel.InadequatePagesException;
 
-import java.io.*;
-import java.util.*;
+import java.io.EOFException;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedList;
 
 /**
  * Encapsulates the state of a user process that is not contained in its user
  * thread (or threads). This includes its address translation state, a file
  * table, and information about the program being executed.
- *
+ * 
  * <p>
  * This class is extended by other classes to support additional functionality
  * (such as additional syscalls).
- *
+ * 
  * @see nachos.vm.VMProcess
  * @see nachos.network.NetProcess
  */
@@ -23,23 +26,26 @@ public class UserProcess {
 	 * Allocate a new process.
 	 */
 	public UserProcess() {
-		int numPhysPages = Machine.processor().getNumPhysPages();
-		pageTable = new TranslationEntry[numPhysPages];
-		for (int i = 0; i < numPhysPages; i++)
-			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
+		sharedStateLock.acquire();
+		PID = nextPID++;
+		runningProcesses++;
+		sharedStateLock.release();
 
-		pid = numOfProcess++;
-		numOfRunningProcess++;
-		// 线程创建后，键盘输入流和显示输出流在不调用open方法的情况下自动打开
-		openfile[0] = UserKernel.console.openForReading();
-		openfile[1] = UserKernel.console.openForWriting();
+		// stdin/stdout
+		fileTable[0] = UserKernel.console.openForReading();
+		FileRef.referenceFile(fileTable[0].getName());
+		fileTable[1] = UserKernel.console.openForWriting();
+		FileRef.referenceFile(fileTable[1].getName());
+
+		// Exit/Join syncronization
+		waitingToJoin = new Condition(joinLock);
 	}
 
 	/**
 	 * Allocate and return a new process of the correct class. The class name is
 	 * specified by the <tt>nachos.conf</tt> key
 	 * <tt>Kernel.processClassName</tt>.
-	 *
+	 * 
 	 * @return a new process of the correct class.
 	 */
 	public static UserProcess newUserProcess() {
@@ -49,7 +55,7 @@ public class UserProcess {
 	/**
 	 * Execute the specified program with the specified arguments. Attempts to
 	 * load the program, and then forks a thread to run it.
-	 *
+	 * 
 	 * @param name
 	 *            the name of the file containing the executable.
 	 * @param args
@@ -59,7 +65,6 @@ public class UserProcess {
 	public boolean execute(String name, String[] args) {
 		if (!load(name, args))
 			return false;
-
 		new UThread(this).setName(name).fork();
 
 		return true;
@@ -81,12 +86,23 @@ public class UserProcess {
 	}
 
 	/**
+	 * Check to see if the virtual address is valid.
+	 * 
+	 * @param vaddr
+	 * @return true if the virtual address is valid
+	 */
+	protected boolean validAddress(int vaddr) {
+		int vpn = Processor.pageFromAddress(vaddr);
+		return vpn < numPages && vpn >= 0;
+	}
+
+	/**
 	 * Read a null-terminated string from this process's virtual memory. Read at
 	 * most <tt>maxLength + 1</tt> bytes from the specified address, search for
 	 * the null terminator, and convert it to a <tt>java.lang.String</tt>,
 	 * without including the null terminator. If no null terminator is found,
 	 * returns <tt>null</tt>.
-	 *
+	 * 
 	 * @param vaddr
 	 *            the starting virtual address of the null-terminated string.
 	 * @param maxLength
@@ -113,7 +129,7 @@ public class UserProcess {
 	/**
 	 * Transfer data from this process's virtual memory to all of the specified
 	 * array. Same as <tt>readVirtualMemory(vaddr, data, 0, data.length)</tt>.
-	 *
+	 * 
 	 * @param vaddr
 	 *            the first byte of virtual memory to read.
 	 * @param data
@@ -130,7 +146,7 @@ public class UserProcess {
 	 * <i>not</i> destroy the current process if an error occurs, but instead
 	 * should return the number of bytes successfully copied (or zero if no data
 	 * could be copied).
-	 *
+	 * 
 	 * @param vaddr
 	 *            the first byte of virtual memory to read.
 	 * @param data
@@ -143,46 +159,34 @@ public class UserProcess {
 	 * @return the number of bytes successfully transferred.
 	 */
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
-		// 从虚拟内存地址读出到data中
-		// 偏移量与长度都要为正数，偏移量+长度<=总的数据长度
-		Lib.assertTrue(offset >= 0 && length >= 0 && offset + length <= data.length);
-		// getMemory会返回主程序的数组
-		byte[] memory = Machine.processor().getMemory(); // 获得物理数组
-		// 计算剩下的页表字节个数
-		if (length > (pageSize * numPages - vaddr))
-			length = pageSize * numPages - vaddr;
-		// 计算能够传输的数据的大小，如果data数组中存不下length，则减小length（传输字节数）
-		if (data.length - offset < length)
-			length = data.length - offset;
-		// 转换成功的字节数
-		int transferredbyte = 0;
-		do {
-			// 计算页号
-			int pageNum = Processor.pageFromAddress(vaddr + transferredbyte);
-			// 页号大于 页表的长度 或者 为负 是异常情况
-			if (pageNum < 0 || pageNum >= pageTable.length)
-				return 0;
-			// 计算页偏移量
-			int pageOffset = Processor.offsetFromAddress(vaddr + transferredbyte);
-			// 计算剩余页的容量
-			int leftByte = pageSize - pageOffset;
-			// 计算下一次传送的数量:剩余页容量和需要转移的字节数中较小者
-			int amount = Math.min(leftByte, length - transferredbyte);
-			// 计算物理内存的地址
-			int realAddress = pageTable[pageNum].ppn * pageSize + pageOffset;
-			// 将物理内存的东西传输到虚拟内存
-			System.arraycopy(memory, realAddress, data, offset + transferredbyte, amount);
-			// 修改传输成功的字节数
-			transferredbyte = transferredbyte + amount;
-		} while (transferredbyte < length);
+		Lib.assertTrue(offset >= 0 && length >= 0
+				&& offset + length <= data.length && memoryAccessLock != null);
+		if (!validAddress(vaddr)) {
+			return 0;
+		} else {
+			Collection<MemoryAccess> memoryAccesses = createMemoryAccesses(
+					vaddr, data, offset, length, AccessType.READ);
 
-		return transferredbyte;
+			int bytesRead = 0, temp;
+
+			memoryAccessLock.acquire();
+			for (MemoryAccess ma : memoryAccesses) {
+				temp = ma.executeAccess();
+
+				if (temp == 0)
+					break;
+				else
+					bytesRead += temp;
+			}
+			memoryAccessLock.release();
+			return bytesRead;
+		}
 	}
 
 	/**
 	 * Transfer all data from the specified array to this process's virtual
 	 * memory. Same as <tt>writeVirtualMemory(vaddr, data, 0, data.length)</tt>.
-	 *
+	 * 
 	 * @param vaddr
 	 *            the first byte of virtual memory to write.
 	 * @param data
@@ -199,7 +203,7 @@ public class UserProcess {
 	 * <i>not</i> destroy the current process if an error occurs, but instead
 	 * should return the number of bytes successfully copied (or zero if no data
 	 * could be copied).
-	 *
+	 * 
 	 * @param vaddr
 	 *            the first byte of virtual memory to write.
 	 * @param data
@@ -212,58 +216,168 @@ public class UserProcess {
 	 * @return the number of bytes successfully transferred.
 	 */
 	public int writeVirtualMemory(int vaddr, byte[] data, int offset, int length) {
-		Lib.assertTrue(offset >= 0 && length >= 0 && offset + length <= data.length);
-		// 物理内存
-		byte[] memory = Machine.processor().getMemory();
-		// 写内存的长度如果超过页剩余量
-		if (length > (pageSize * numPages - vaddr))
-			length = pageSize * numPages - vaddr;
-		// 如果数组中要写的长度比给定的小，则给length减为数组剩余的长度
-		if (data.length - offset < length)
-			length = data.length - offset;
-		int transferredbyte = 0;
-		do {
-			// 此函数返回给定地址的页号
-			int pageNum = Processor.pageFromAddress(vaddr + transferredbyte);
-			if (pageNum < 0 || pageNum >= pageTable.length)
-				return 0;
-			// 此函数返回给定地址的页偏移量
-			int pageOffset = Processor.offsetFromAddress(vaddr + transferredbyte);
-			// 页剩余的字节数
-			int leftByte = pageSize - pageOffset;
-			// 设置本次转移的数量
-			int amount = Math.min(leftByte, length - transferredbyte);
-			int realAddress = pageTable[pageNum].ppn * pageSize + pageOffset;
-			// 从虚拟内存写入到物理内存
-			System.arraycopy(data, offset + transferredbyte, memory, realAddress, amount);
-			// 改变写成功的字节数
-			transferredbyte = transferredbyte + amount;
-		} while (transferredbyte < length);
+		Lib.assertTrue(offset >= 0 && length >= 0
+				&& offset + length <= data.length && memoryAccessLock != null);
+		if (!validAddress(vaddr)) {
+			return 0;
+		} else {
+			Collection<MemoryAccess> memoryAccesses = createMemoryAccesses(
+					vaddr, data, offset, length, AccessType.WRITE);
 
-		return transferredbyte;
-		// for now, just assume that virtual addresses equal physical addresses
-		// if (vaddr < 0 || vaddr >= memory.length)
-		// return 0;
-		//
-		// int amount = Math.min(length, memory.length - vaddr);
-		// System.arraycopy(data, offset, memory, vaddr, amount);
-		//
-		// return amount;
+			int bytesWritten = 0, temp;
+			memoryAccessLock.acquire();
+			for (MemoryAccess ma : memoryAccesses) {
+				temp = ma.executeAccess();
+				if (temp == 0)
+					break;
+				else
+					bytesWritten += temp;
+			}
+			memoryAccessLock.release();
+
+			return bytesWritten;
+		}
 	}
+
+	/**
+	 * Generates a set of <tt>MemoryAccess</tt> instances corresponding to the
+	 * desired action.
+	 * 
+	 * @param vaddr
+	 * @param data
+	 * @param offset
+	 * @param length
+	 * @param accessType
+	 * @author Sam Whitlock (cs162-ap)
+	 * @return A collection of <tt>MemoryAccess</tt> instances corresponding to
+	 *         the desired action.
+	 */
+	private Collection<MemoryAccess> createMemoryAccesses(int vaddr,
+			byte[] data, int offset, int length, AccessType accessType) {
+		LinkedList<MemoryAccess> returnList = new LinkedList<MemoryAccess>();
+
+		while (length > 0) {
+			int vpn = Processor.pageFromAddress(vaddr);
+
+			int potentialPageAccess = Processor.pageSize
+					- Processor.offsetFromAddress(vaddr);
+			int accessSize = length < potentialPageAccess ? length
+					: potentialPageAccess;
+
+			returnList.add(new MemoryAccess(accessType, data, vpn, offset,
+					Processor.offsetFromAddress(vaddr), accessSize));
+			length -= accessSize;
+			vaddr += accessSize;
+			offset += accessSize;
+		}
+
+		return returnList;
+	}
+
+	/**
+	 * An inner class to represent a memory access.
+	 * 
+	 * @author Sam Whitlock (cs162-ap)
+	 */
+	protected class MemoryAccess {
+		protected MemoryAccess(AccessType at, byte[] d, int _vpn, int dStart,
+				int pStart, int len) {
+			accessType = at;
+			data = d;
+			vpn = _vpn;
+			dataStart = dStart;
+			pageStart = pStart;
+			length = len;
+		}
+
+		/**
+		 * Execute the requested memory access.
+		 * 
+		 * @return The number of bytes successfully written (or 0 if it fails).
+		 */
+		public int executeAccess() {
+			if (translationEntry == null)
+				translationEntry = pageTable[vpn];
+			if (translationEntry.valid) {
+				if (accessType == AccessType.READ) {// Do a read
+					System.arraycopy(Machine.processor().getMemory(), pageStart
+							+ (Processor.pageSize * translationEntry.ppn),
+							data, dataStart, length);
+					translationEntry.used = true;
+					return length;
+				} else if (!translationEntry.readOnly
+						&& accessType == AccessType.WRITE) {// FIXME: If this
+															// last part
+															// necessary?
+					System.arraycopy(data, dataStart, Machine.processor()
+							.getMemory(), pageStart
+							+ (Processor.pageSize * translationEntry.ppn),
+							length);
+					translationEntry.used = translationEntry.dirty = true;
+					return length;
+				}
+			}
+
+			return 0;
+		}
+
+		/**
+		 * A reference to the data array we are supposed to fill or write from
+		 */
+		protected byte[] data;
+
+		/**
+		 * Which access should occur
+		 */
+		protected AccessType accessType;
+
+		/**
+		 * The translation entry corresponding to the appropriate page to be
+		 * accessed.
+		 */
+		protected TranslationEntry translationEntry;
+
+		/**
+		 * Bounds for accessing the data array.
+		 */
+		protected int dataStart;
+
+		/**
+		 * Bounds for accessing the page.
+		 */
+		protected int pageStart;
+
+		/**
+		 * Length of the access (the same for the array and the page).
+		 */
+		protected int length;
+
+		/**
+		 * The VPN of the page needed.
+		 */
+		protected int vpn;
+	}
+
+	/**
+	 * An enum to represent what data access should be done
+	 */
+	protected static enum AccessType {
+		READ, WRITE
+	};
 
 	/**
 	 * Load the executable with the specified name into this process, and
 	 * prepare to pass it the specified arguments. Opens the executable, reads
 	 * its header information, and copies sections and arguments into this
 	 * process's virtual memory.
-	 *
+	 * 
 	 * @param name
 	 *            the name of the file containing the executable.
 	 * @param args
 	 *            the arguments to pass to the executable.
 	 * @return <tt>true</tt> if the executable was successfully loaded.
 	 */
-	private boolean load(String name, String[] args) {
+	protected boolean load(String name, String[] args) {
 		Lib.debug(dbgProcess, "UserProcess.load(\"" + name + "\")");
 
 		OpenFile executable = ThreadedKernel.fileSystem.open(name, false);
@@ -326,6 +440,17 @@ public class UserProcess {
 		this.argc = args.length;
 		this.argv = entryOffset;
 
+		loadArguments(entryOffset, stringOffset, argv);
+
+		return true;
+	}
+
+	/**
+	 * Loads the arguments into the last page
+	 */
+	protected void loadArguments(int entryOffset, int stringOffset,
+			byte[][] argv) {
+		// load the arguments into the last page
 		for (int i = 0; i < argv.length; i++) {
 			byte[] stringOffsetBytes = Lib.bytesFromInt(stringOffset);
 			Lib.assertTrue(writeVirtualMemory(entryOffset, stringOffsetBytes) == 4);
@@ -335,66 +460,52 @@ public class UserProcess {
 			Lib.assertTrue(writeVirtualMemory(stringOffset, new byte[] { 0 }) == 1);
 			stringOffset += 1;
 		}
-
-		return true;
 	}
 
 	/**
 	 * Allocates memory for this process, and loads the COFF sections into
 	 * memory. If this returns successfully, the process will definitely be run
 	 * (this is the last step in process initialization that can fail).
-	 *
+	 * 
 	 * @return <tt>true</tt> if the sections were successfully loaded.
 	 */
 	protected boolean loadSections() {
-		UserKernel.allocateMemoryLock.acquire();// 获取分配的内存的锁
-		// 进程所需要的页面数已知，保存在numPages中
-		// 判断能否分配内存
-		// numPages中 已经确定了需要页的数量
-		// 页数量如果大于实际物理内存的页数量，则不能加载
-		if (numPages > Machine.processor().getNumPhysPages()) {
-			// 判断能否装载
-			coff.close();
-			// 缺少物理内存（如果程序的页数大于处理器的空闲物理页数就会失败）
-			Lib.debug(dbgProcess, "\t insufficient（缺少物理地址） physical memory");
-			UserKernel.allocateMemoryLock.release();
-			return false;// 返回装载失败
-		}
-		pageTable = new TranslationEntry[numPages];// 实例化页表
-		for (int i = 0; i < numPages; i++) {
-			// 从空闲物理页号链表中拿出一个
-			int nextPage = UserKernel.memoryLinkedList.remove();
-			pageTable[i] = new TranslationEntry(i, nextPage, true, false, false, false);
-		}
-		UserKernel.allocateMemoryLock.release();
-		// load sections（段），一个段是由很多页组成
-		for (int s = 0; s < coff.getNumSections(); s++) {
-			CoffSection section = coff.getSection(s); // coff获得Section
-			Lib.debug(dbgProcess,
-					"\tinitializing " + section.getName() + " section (" + section.getLength() + " pages)");
-			for (int i = 0; i < section.getLength(); i++) {
-				int vpn = section.getFirstVPN() + i;// 得到每一段虚拟页号（有页号偏移i），section不同
-				pageTable[vpn].readOnly = section.isReadOnly();// 标记为只读
-				// for now, just assume virtual addresses=physical addresses
-				// 装入物理页
-				section.loadPage(i, pageTable[vpn].ppn);
+		try {
+			pageTable = ((UserKernel) Kernel.kernel).acquirePages(numPages);
+
+			for (int i = 0; i < pageTable.length; i++)
+				pageTable[i].vpn = i;
+
+			for (int sectionNumber = 0; sectionNumber < coff.getNumSections(); sectionNumber++) {
+				CoffSection section = coff.getSection(sectionNumber);
+
+				Lib.debug(dbgProcess, "\tinitializing " + section.getName()
+						+ " section (" + section.getLength() + " pages)");
+
+				int firstVPN = section.getFirstVPN();
+				for (int i = 0; i < section.getLength(); i++)
+					section.loadPage(i, pageTable[i + firstVPN].ppn);
 			}
+		} catch (InadequatePagesException a) {
+			coff.close();
+			Lib.debug(dbgProcess, "\tinsufficient physical memory");
+			return false;
+		} catch (ClassCastException c) {
+			Lib.assertNotReached("Error : instantiating a UserProcess without a UserKernel");
 		}
+
 		return true;
 	}
 
 	/**
-	 * 释放内存 Release any resources allocated by <tt>loadSections()</tt>.
+	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
-		UserKernel.allocateMemoryLock.acquire();
-
-		for (int i = 0; i < numPages; i++) {
-			UserKernel.memoryLinkedList.add(pageTable[i].ppn); // 将该用户进程占用的内存加入空闲内存链表中
-			pageTable[i] = null;
+		try {
+			((UserKernel) Kernel.kernel).releasePages(pageTable);
+		} catch (ClassCastException c) {
+			Lib.assertNotReached("Error : Kernel is not an instance of UserKernel");
 		}
-
-		UserKernel.allocateMemoryLock.release();
 	}
 
 	/**
@@ -408,7 +519,7 @@ public class UserProcess {
 		Processor processor = Machine.processor();
 
 		// by default, everything's 0
-		for (int i = 0; i < processor.numUserRegisters; i++)
+		for (int i = 0; i < Processor.numUserRegisters; i++)
 			processor.writeRegister(i, 0);
 
 		// initialize PC and SP according
@@ -424,215 +535,390 @@ public class UserProcess {
 	 * Handle the halt() system call.
 	 */
 	private int handleHalt() {
-		// 处理halt系统调用，只有根进程可以
-		if (pid == 0)
-			Machine.halt();
+		// halt() is noop if not root process
+		if (PID != 0)
+			return 0;
+
+		Machine.halt();
 
 		Lib.assertNotReached("Machine.halt() did not halt machine!");
 		return 0;
 	}
 
 	/**
-	 * Handle the exec() system call. 创建一个子进程，并执行
+	 * Return first unused file descriptor, or -1 if fileTable full
 	 */
-	private int handleExec(int fileAddress, int argc, int argvAddress) {
-		// 从内存中读出这个进程使用的文件的名字
-		String filename = readVirtualMemoryString(fileAddress, 256);
-		if (filename == null || argc < 0 || argvAddress < 0 || argvAddress > numPages * pageSize)
-			return -1;
-
-		// 得到子进程的参数表
-		String[] args = new String[argc];
-		for (int i = 0; i < argc; i++) {
-			byte[] argsAddress = new byte[4];
-			if (readVirtualMemory(argvAddress + i * 4, argsAddress) > 0)
-				args[i] = readVirtualMemoryString(Lib.bytesToInt(argsAddress, 0), 256);
-		}
-
-		UserProcess process = UserProcess.newUserProcess();
-		if (!process.execute(filename, args))
-			return -1;
-
-		process.parentProcess = this; // 将父进程指向调用这个方法的进程
-		childProcess.add(process); // 在子进程的链表中加入新创建的进程
-		return process.pid;
-	}
-
-	/**
-	 * Handle the exit() system call.
-	 */
-	private int handleExit(int status) {
-		coff.close(); // 关闭文件
-		for (int i = 0; i < 16; i++) {// 关闭所有打开的文件
-			if (openfile[i] != null) {
-				openfile[i].close();
-				openfile[i] = null;
-			}
-		}
-		this.status = status;// 把状态置入
-		normalExit = true;// 属于正常退出
-
-		// 如果有父进程，就从父进程的子进程链表中删除，而且如果父进程join子进程，唤醒父进程
-		if (parentProcess != null) {
-			joinLock.acquire();
-			joinCondition.wake();
-			joinLock.release();
-			parentProcess.childProcess.remove(this);
-		}
-
-		unloadSections(); // 释放内存
-		KThread.finish(); // 将进程置为完成态，进行下一个进程，如果有join的进程，将join移出等待队列
-
-		if (numOfRunningProcess == 1) // 如果是最后一个进程，则关闭机器
-			Machine.halt();
-
-		numOfRunningProcess--;
-
-		return 0;
-	}
-
-	/**
-	 * Handle the join() system call.
-	 */
-	private int handleJoin(int pid, int statusAddress) {
-		UserProcess process = null;
-		for (int i = 0; i < childProcess.size(); i++) {// 找到是否属于自己的子进程
-			if (pid == childProcess.get(i).pid) {
-				process = childProcess.get(i);
-				break;
-			}
-		}
-
-		if (process == null || process.thread == null) {
-			// 如果没有子进程或者子进程还没创建UThread，出错
-			return -1;
-		}
-
-		process.joinLock.acquire();// 获得join锁
-		process.joinCondition.sleep();// 进程休眠等待直到子进程结束将其唤醒
-		process.joinLock.release();// 释放join锁，此时子线程已经结束
-
-		byte[] childstat = new byte[4];
-		Lib.bytesFromInt(childstat, 0, process.status);// 得到子进程的状态
-		int numWriteByte = writeVirtualMemory(statusAddress, childstat);// 将子进程的状态装入自己拥有的内存
-		if (process.normalExit && numWriteByte == 4)// 子进程是正常结束，且写入状态成功
-			return 1;
-
-		return 0;
-	}
-
-	/**
-	 * Handle the create() system call. 创建一个文件，返回文件描述符
-	 */
-	private int handleCreate(int fileAddress) {
-		String fileName = readVirtualMemoryString(fileAddress, 256); // 限定文件名长度
-		if (fileName == null)// 文件名不存在,创建失败
-			return -1;
-
-		int fileDescriptor = findEmpty();
-		if (fileDescriptor == -1) // 进程打开文件数已经达到上限，无法创建并打开
-			return fileDescriptor;
-		else { // 文件不存在直接创建
-			openfile[fileDescriptor] = ThreadedKernel.fileSystem.open(fileName, true);
-		}
-		return fileDescriptor;
-	}
-
-	/**
-	 * Handle the open() system call. 打开文件
-	 */
-	private int handleOpen(int fileAddress) {
-		String fileName = readVirtualMemoryString(fileAddress, 256); // 限定文件名长度
-		if (fileName == null)// 文件名不存在,创建失败
-			return -1;
-
-		int fileDescriptor = findEmpty();
-		if (fileDescriptor == -1) // 进程打开文件数已经达到上限，无法创建并打开
-			return fileDescriptor;
-		else { // 文件不存在直接创建
-			openfile[fileDescriptor] = ThreadedKernel.fileSystem.open(fileName, false);
-		}
-		return fileDescriptor;
-	}
-
-	/**
-	 * Handle the read() system call. 从文件中读出数据写入自己拥有的内存的指定地址
-	 */
-	private int handleRead(int fileDescriptor, int bufferAddress, int length) {
-		if (fileDescriptor > 15 || fileDescriptor < 0 || openfile[fileDescriptor] == null)
-			return -1; // 文件未打开，出错
-
-		byte temp[] = new byte[length];
-		int readNumber = openfile[fileDescriptor].read(temp, 0, length);
-		if (readNumber <= 0)
-			return 0; // 没读出数据
-
-		int writeNumber = writeVirtualMemory(bufferAddress, temp);
-
-		return writeNumber;
-	}
-
-	/**
-	 * Handle the write() system call. 将自己拥有的内存的指定地址的数据写入文件
-	 */
-	private int handleWrite(int fileDescriptor, int bufferAddress, int length) {
-		if (fileDescriptor > 15 || fileDescriptor < 0 || openfile[fileDescriptor] == null)
-			return -1; // 文件未打开，出错
-
-		byte temp[] = new byte[length];
-		int readNumber = readVirtualMemory(bufferAddress, temp);
-		if (readNumber <= 0)
-			return 0; // 没读出数据
-
-		int writeNumber = openfile[fileDescriptor].write(temp, 0, length);
-		if (writeNumber < length)
-			return -1;// 未完全写入，出错
-
-		return writeNumber;
-	}
-
-	/**
-	 * Handle the close() system call. 用于关闭打开的文件
-	 */
-	private int handleClose(int fileDescriptor) {
-		if (fileDescriptor > 15 || fileDescriptor < 0 || openfile[fileDescriptor] == null)
-			return -1;// 文件不存在，关闭出错
-
-		openfile[fileDescriptor].close();
-		openfile[fileDescriptor] = null;
-		return 0;
-	}
-
-	/**
-	 * Handle the unlink() system call. 用于删除文件
-	 */
-	private int handleUnlink(int fileAddress) {
-		String filename = readVirtualMemoryString(fileAddress, 256);
-		if (filename == null)
-			return 0;// 文件不存在,不必删除
-
-		if (ThreadedKernel.fileSystem.remove(filename))// 删除磁盘中实际的文件
-			return 0;
-		else
-			return -1;
-	}
-
-	// 找到合适的文件打开表的位置，返回文件描述符
-	private int findEmpty() {
-		for (int i = 0; i < 16; i++) {
-			if (openfile[i] == null)
+	protected int getFileDescriptor() {
+		for (int i = 0; i < fileTable.length; i++) {
+			if (fileTable[i] == null)
 				return i;
 		}
 		return -1;
 	}
 
-	private static final int syscallHalt = 0, syscallExit = 1, syscallExec = 2, syscallJoin = 3, syscallCreate = 4,
-			syscallOpen = 5, syscallRead = 6, syscallWrite = 7, syscallClose = 8, syscallUnlink = 9;
+	/**
+	 * Return whether the given file descriptor is valid
+	 */
+	private boolean validFileDescriptor(int fileDesc) {
+		// In range?
+		if (fileDesc < 0 || fileDesc >= fileTable.length)
+			return false;
+		// Table entry valid?
+		return fileTable[fileDesc] != null;
+	}
+
+	/**
+	 * Handle creat(char* filename) system call
+	 * 
+	 * @param fileNamePtr
+	 *            pointer to null terminated file name
+	 * @return file descriptor used to further reference the new file
+	 */
+	private int handleCreate(int fileNamePtr) {
+		return openFile(fileNamePtr, true);
+	}
+
+	/**
+	 * Handle open(char* filename) system call
+	 * 
+	 * @param fileNamePtr
+	 *            pointer to null terminated file name
+	 * @return file descriptor used to further reference the new file
+	 */
+	private int handleOpen(int fileNamePtr) {
+		return openFile(fileNamePtr, false);
+	}
+
+	/**
+	 * Open a file and add it to the process file table
+	 */
+	private int openFile(int fileNamePtr, boolean create) {
+		if (!validAddress(fileNamePtr))
+			return terminate();
+
+		// Try to get an entry in the file table
+		int fileDesc = getFileDescriptor();
+		if (fileDesc == -1)
+			return -1;
+
+		String fileName = readVirtualMemoryString(fileNamePtr,
+				maxSyscallArgLength);
+
+		// Attempt to add a new reference to this file
+		if (!FileRef.referenceFile(fileName))
+			return -1; // Cannot make new references to files that are marked
+						// for deletion
+
+		// Attempt to actually open the file
+		OpenFile file = UserKernel.fileSystem.open(fileName, create);
+		if (file == null) {
+			// Remove the previously created reference since we failed to open
+			// the file
+			FileRef.unreferenceFile(fileName);
+			return -1;
+		}
+
+		// Store the file in our file table
+		fileTable[fileDesc] = file;
+
+		return fileDesc;
+	}
+
+	/**
+	 * Read data from open file into buffer
+	 * 
+	 * @param fileDesc
+	 *            File descriptor
+	 * @param bufferPtr
+	 *            Pointer to buffer in virtual memory
+	 * @param size
+	 *            How much to read
+	 * @return Number of bytes read, or -1 on error
+	 */
+	private int handleRead(int fileDesc, int bufferPtr, int size) {
+		if (!validAddress(bufferPtr))
+			return terminate();
+		if (!validFileDescriptor(fileDesc))
+			return -1;
+
+		byte buffer[] = new byte[size];
+		int bytesRead = fileTable[fileDesc].read(buffer, 0, size);
+
+		// Failed to read
+		if (bytesRead == -1)
+			return -1;
+
+		int bytesWritten = writeVirtualMemory(bufferPtr, buffer, 0, bytesRead);
+		// We weren't able to write the whole buffer to memory!
+		if (bytesWritten != bytesRead)
+			return -1;
+
+		return bytesRead;
+	}
+
+	/**
+	 * Write data from buffer into an open file
+	 * 
+	 * @param fileDesc
+	 *            File descriptor
+	 * @param bufferPtr
+	 *            Pointer to buffer in virtual memory
+	 * @param size
+	 *            Size of buffer
+	 * @return Number of bytes successfully written, or -1 on error
+	 */
+	private int handleWrite(int fileDesc, int bufferPtr, int size) {
+		if (!validAddress(bufferPtr))
+			return terminate();
+		if (!validFileDescriptor(fileDesc))
+			return -1;
+
+		byte buffer[] = new byte[size];
+		int bytesRead = readVirtualMemory(bufferPtr, buffer);
+		int bytesWritten = fileTable[fileDesc].write(buffer, 0, bytesRead);
+
+		// -1 if error
+		return bytesWritten;
+	}
+
+	/**
+	 * Close a file and free its place in the file table
+	 * 
+	 * @param fileDesc
+	 *            Index of file in file table
+	 * @return 0 on success, -1 on error
+	 */
+	private int handleClose(int fileDesc) {
+		if (!validFileDescriptor(fileDesc))
+			return -1;
+
+		String fileName = fileTable[fileDesc].getName();
+
+		// Remove the file from our file table
+		fileTable[fileDesc].close();
+		fileTable[fileDesc] = null;
+
+		// Unreference the file and delete if necessary
+		return FileRef.unreferenceFile(fileName);
+	}
+
+	/**
+	 * Mark a file as pending deletion, and remove it if there are no currently
+	 * active references If not immediately removed, the file will be removed
+	 * when all the active references are closed
+	 * 
+	 * @param fileNamePtr
+	 *            Pointer to null terminated string with filename
+	 * @return 0 on success, -1 on error
+	 */
+	private int handleUnlink(int fileNamePtr) {
+		if (!validAddress(fileNamePtr))
+			return terminate();
+
+		String fileName = readVirtualMemoryString(fileNamePtr,
+				maxSyscallArgLength);
+		return FileRef.deleteFile(fileName);
+	}
+
+	/**
+	 * Handle spawning a new process
+	 * 
+	 * @param fileNamePtr
+	 *            Pointer to null terminated string containing executable name
+	 * @param argc
+	 *            Number of arguments to pass new process
+	 * @param argvPtr
+	 *            Array of null terminated strings containing arguments
+	 * @return PID of child process, or -1 on failure
+	 */
+	private int handleExec(int fileNamePtr, int argc, int argvPtr) {
+		// Verify that passed pointers are valid
+		if (!validAddress(fileNamePtr) || !validAddress(argv))
+			return terminate();
+
+		// Read filename from virtual memory
+		String fileName = readVirtualMemoryString(fileNamePtr,
+				maxSyscallArgLength);
+		if (fileName == null || !fileName.endsWith(".coff"))
+			return -1;
+
+		// Gather arguments for the new process
+		String arguments[] = new String[argc];
+
+		// Read the argv char* array
+		int argvLen = argc * 4; // Number of bytes in the array
+		byte argvArray[] = new byte[argvLen];
+		if (argvLen != readVirtualMemory(argvPtr, argvArray)) {
+			// Failed to read the whole array
+			return -1;
+		}
+
+		// Read each argument string from the char* array
+		for (int i = 0; i < argc; i++) {
+			// Get char* pointer for next position in array
+			int pointer = Lib.bytesToInt(argvArray, i * 4);
+
+			// Verify that it is valid
+			if (!validAddress(pointer))
+				return -1;
+
+			// Read in the argument string
+			arguments[i] = readVirtualMemoryString(pointer, maxSyscallArgLength);
+		}
+
+		// New process
+		UserProcess newChild = newUserProcess();
+		newChild.parent = this;
+
+		// Remember our children
+		children.put(newChild.PID, new ChildProcess(newChild));
+
+		// Run and be free!
+		newChild.execute(fileName, arguments);
+
+		return newChild.PID;
+	}
+
+	/**
+	 * Handle exiting and cleanup of a process
+	 * 
+	 * @param status
+	 *            Integer exit status, or null if exiting due to unhandled
+	 *            exception
+	 * @return Irrelevant - user process never sees this syscall return
+	 */
+	private int handleExit(Integer status) {
+		joinLock.acquire();
+
+		// Attempt to inform our parent that we're exiting
+		if (parent != null)
+			parent.notifyChildExitStatus(PID, status);
+
+		// Disown all of our running children
+		for (ChildProcess child : children.values())
+			if (child.process != null)
+				child.process.disown();
+		children = null;
+
+		// Loop through all open files and close them, releasing references
+		for (int fileDesc = 0; fileDesc < fileTable.length; fileDesc++)
+			if (validFileDescriptor(fileDesc))
+				handleClose(fileDesc);
+
+		// Free virtual memory
+		unloadSections();
+
+		// Wakeup anyone who is waiting for us to exit
+		exited = true;
+		waitingToJoin.wakeAll();
+		joinLock.release();
+
+		// Halt the machine if we were the last process
+		sharedStateLock.acquire();
+		if (--runningProcesses == 0)
+			Kernel.kernel.terminate();
+		sharedStateLock.release();
+
+		// Terminate current thread
+		KThread.finish();
+
+		return 0;
+	}
+
+	/**
+	 * Called on a parent process by an exiting child to inform them that the
+	 * child has terminated.
+	 * 
+	 * @param childPID
+	 * @param childStatus
+	 *            Value of the exit status, or null if exited due to unhandled
+	 *            exception
+	 */
+	protected void notifyChildExitStatus(int childPID, Integer childStatus) {
+		ChildProcess child = children.get(childPID);
+		if (child == null)
+			return;
+
+		// Remove reference to actual child so it can be garbage collected
+		child.process = null;
+		// Record child's exit status for posterity
+		child.returnValue = childStatus;
+	}
+
+	/**
+	 * Called on a child by an exiting parent to inform them that they are now
+	 * an orphan.
+	 */
+	protected void disown() {
+		parent = null;
+	}
+
+	/**
+	 * Terminate this process due to unhandled exception
+	 */
+	private int terminate() {
+		handleExit(null);
+		return -1;
+	}
+
+	/**
+	 * Wait for child process to exit and transfer exit value
+	 * 
+	 * @param pid
+	 *            Pid of process to join on
+	 * @param statusPtr
+	 *            Pointer to store process exit status
+	 * @return -1 on attempt to join non child process 1 if child exited due to
+	 *         unhandled exception 0 if child exited cleanly
+	 */
+	private int handleJoin(int pid, int statusPtr) {
+		if (!validAddress(statusPtr))
+			return terminate();
+
+		ChildProcess child = children.get(pid);
+
+		// Can't join on non-child!
+		if (child == null)
+			return -1;
+
+		// Child still running, try to join
+		if (child.process != null)
+			child.process.joinProcess();
+		// We can safely forget about this child after join
+		children.remove(pid);
+
+		// Child will have transfered return value to us
+
+		// Child exited due to unhandled exception
+		if (child.returnValue == null)
+			return 0;
+
+		// Transfer return value into status ptr
+		writeVirtualMemory(statusPtr, Lib.bytesFromInt(child.returnValue));
+
+		// Child exited cleanly
+		return 1;
+	}
+
+	/**
+	 * Cause caller to sleep until this process has exited
+	 */
+	private void joinProcess() {
+		joinLock.acquire();
+		while (!exited)
+			waitingToJoin.sleep();
+		joinLock.release();
+	}
+
+	private static final int syscallHalt = 0, syscallExit = 1, syscallExec = 2,
+			syscallJoin = 3, syscallCreate = 4, syscallOpen = 5,
+			syscallRead = 6, syscallWrite = 7, syscallClose = 8,
+			syscallUnlink = 9;
 
 	/**
 	 * Handle a syscall exception. Called by <tt>handleException()</tt>. The
 	 * <i>syscall</i> argument identifies which syscall the user executed:
-	 *
+	 * 
 	 * <table>
 	 * <tr>
 	 * <td>syscall#</td>
@@ -666,12 +952,12 @@ public class UserProcess {
 	 * <tr>
 	 * <td>6</td>
 	 * <td><tt>int  read(int fd, char *buffer, int size);
-	 *								</tt></td>
+	 * 								</tt></td>
 	 * </tr>
 	 * <tr>
 	 * <td>7</td>
 	 * <td><tt>int  write(int fd, char *buffer, int size);
-	 *								</tt></td>
+	 * 								</tt></td>
 	 * </tr>
 	 * <tr>
 	 * <td>8</td>
@@ -699,12 +985,14 @@ public class UserProcess {
 		switch (syscall) {
 		case syscallHalt:
 			return handleHalt();
+
 		case syscallExit:
 			return handleExit(a0);
 		case syscallExec:
 			return handleExec(a0, a1, a2);
 		case syscallJoin:
 			return handleJoin(a0, a1);
+
 		case syscallCreate:
 			return handleCreate(a0);
 		case syscallOpen:
@@ -726,11 +1014,10 @@ public class UserProcess {
 	}
 
 	/**
-	 * Handle a user exception. Called by
-	 * <tt>UserKernel.exceptionHandler()</tt>. The <i>cause</i> argument
-	 * identifies which exception occurred; see the
-	 * <tt>Processor.exceptionZZZ</tt> constants.
-	 *
+	 * Handle a user exception. Called by <tt>UserKernel.exceptionHandler()</tt>
+	 * . The <i>cause</i> argument identifies which exception occurred; see the
+	 * <tt>Processor.exception</tt> constants.
+	 * 
 	 * @param cause
 	 *            the user exception that occurred.
 	 */
@@ -739,34 +1026,149 @@ public class UserProcess {
 
 		switch (cause) {
 		case Processor.exceptionSyscall:
-			int result = handleSyscall(processor.readRegister(Processor.regV0), processor.readRegister(Processor.regA0),
-					processor.readRegister(Processor.regA1), processor.readRegister(Processor.regA2),
+			int result = handleSyscall(processor.readRegister(Processor.regV0),
+					processor.readRegister(Processor.regA0),
+					processor.readRegister(Processor.regA1),
+					processor.readRegister(Processor.regA2),
 					processor.readRegister(Processor.regA3));
 			processor.writeRegister(Processor.regV0, result);
 			processor.advancePC();
 			break;
 
 		default:
-			Lib.debug(dbgProcess, "Unexpected exception: " + Processor.exceptionNames[cause]);
+			Lib.debug(dbgProcess, "Unexpected exception: "
+					+ Processor.exceptionNames[cause]);
+
+			// Process did something naughty
+			terminate();
+
 			Lib.assertNotReached("Unexpected exception");
 		}
 	}
 
-	public int status = 0; // 进程的状态
-	private int pid = 0; // 进程号
-	OpenFile openfile[] = new OpenFile[16]; // 进程打开的文件表
+	/**
+	 * Internal class to keep track of children processes and their exit value
+	 */
+	private static class ChildProcess {
+		public Integer returnValue;
+		public UserProcess process;
 
-	public UThread thread = null; // 这个进程所对应的实际线程
+		ChildProcess(UserProcess child) {
+			process = child;
+			returnValue = null;
+		}
+	}
 
-	public boolean normalExit = false;// 退出状态，是否为正常退出
+	/**
+	 * Internal class to keep track of how many processes reference a given file
+	 */
+	protected static class FileRef {
+		int references;
+		boolean delete;
 
-	public LinkedList<UserProcess> childProcess = new LinkedList<UserProcess>();// 所创建的子进程链表
-	public UserProcess parentProcess = null;// 创建这个进程的父进程
-	private static int numOfProcess = 0;// 进程计数器
-	private static int numOfRunningProcess = 0;// 运行进程计数器
+		/**
+		 * Increment the number of active references there are to a file
+		 * 
+		 * @return False if the file has been marked for deletion
+		 */
+		public static boolean referenceFile(String fileName) {
+			FileRef ref = updateFileReference(fileName);
+			boolean canReference = !ref.delete;
+			if (canReference)
+				ref.references++;
+			finishUpdateFileReference();
+			return canReference;
+		}
 
-	private Lock joinLock = new Lock();// 进程join方法等待锁
-	private Condition joinCondition = new Condition(joinLock);// join方法使用的条件变量
+		/**
+		 * Decrement the number of active references there are to a file Delete
+		 * the file if necessary
+		 * 
+		 * @return 0 on success, -1 on failure
+		 */
+		public static int unreferenceFile(String fileName) {
+			FileRef ref = updateFileReference(fileName);
+			ref.references--;
+			Lib.assertTrue(ref.references >= 0);
+			int ret = removeIfNecessary(fileName, ref);
+			finishUpdateFileReference();
+			return ret;
+		}
+
+		/**
+		 * Mark a file as pending deletion, and delete the file if no active
+		 * references
+		 * 
+		 * @return 0 on success, -1 on failure
+		 */
+		public static int deleteFile(String fileName) {
+			FileRef ref = updateFileReference(fileName);
+			ref.delete = true;
+			int ret = removeIfNecessary(fileName, ref);
+			finishUpdateFileReference();
+			return ret;
+		}
+
+		/**
+		 * Remove a file if marked for deletion and has no active references
+		 * Remove the file from the reference table if no active references THIS
+		 * FUNCTION MUST BE CALLED WITHIN AN UPDATEFILEREFERENCE LOCK!
+		 * 
+		 * @return 0 on success, -1 on failure to remove file
+		 */
+		private static int removeIfNecessary(String fileName, FileRef ref) {
+			if (ref.references <= 0) {
+				globalFileReferences.remove(fileName);
+				if (ref.delete == true) {
+					if (!UserKernel.fileSystem.remove(fileName))
+						return -1;
+				}
+			}
+			return 0;
+		}
+
+		/**
+		 * Lock the global file reference table and return a file reference for
+		 * modification. If the reference doesn't already exist, create it.
+		 * finishUpdateFileReference() must be called to unlock the table again!
+		 *
+		 * @param fileName
+		 *            File we with to reference
+		 * @return FileRef object
+		 */
+		private static FileRef updateFileReference(String fileName) {
+			globalFileReferencesLock.acquire();
+			FileRef ref = globalFileReferences.get(fileName);
+			if (ref == null) {
+				ref = new FileRef();
+				globalFileReferences.put(fileName, ref);
+			}
+
+			return ref;
+		}
+
+		/**
+		 * Release the lock on the global file reference table
+		 */
+		private static void finishUpdateFileReference() {
+			globalFileReferencesLock.release();
+		}
+
+		/** Global file reference tracker & lock */
+		private static HashMap<String, FileRef> globalFileReferences = new HashMap<String, FileRef>();
+		private static Lock globalFileReferencesLock = new Lock();
+	}
+
+	/** Lock to protect static variables */
+	private static Lock sharedStateLock = new Lock();
+
+	/** Process ID */
+	private static int nextPID = 0;
+	protected int PID;
+
+	/** Parent/Child process tree */
+	protected UserProcess parent;
+	private HashMap<Integer, ChildProcess> children = new HashMap<Integer, ChildProcess>();
 
 	/** The program being run by this process. */
 	protected Coff coff;
@@ -784,4 +1186,23 @@ public class UserProcess {
 
 	private static final int pageSize = Processor.pageSize;
 	private static final char dbgProcess = 'a';
+
+	/**
+	 * A lock to protect memory accesses.
+	 */
+	private Lock memoryAccessLock = new Lock();
+
+	/** Process file descriptor table */
+	protected OpenFile[] fileTable = new OpenFile[16];
+
+	/** Join condition */
+	private boolean exited = false;
+	private Lock joinLock = new Lock();
+	private Condition waitingToJoin;
+
+	/** Number of processes */
+	private static int runningProcesses = 0;
+
+	/** The maximum length of any system call string argument */
+	private static final int maxSyscallArgLength = 256;
 }

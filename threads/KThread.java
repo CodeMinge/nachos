@@ -1,7 +1,6 @@
 package nachos.threads;
 
 import nachos.machine.*;
-import nachos.proj1.*;
 import nachos.threads.PriorityScheduler.ThreadState;
 
 /**
@@ -472,37 +471,50 @@ public class KThread {
 	 * Tests whether this module is working.
 	 */
 	public static void selfTest() {
-		Lib.debug(dbgThread, "Enter KThread.selfTest");
+		// Lib.debug(dbgThread, "Enter KThread.selfTest");
 
 		// new KThread(new PingTest(1)).setName("forked thread").fork();
 		// new PingTest(0).run();
 
-		// joinTest();
-//		 condition2Test();
-		// alarmTest();
-		// communicatorTest();
-		// boatTest();
-//		 schedulertest();
+		joinTest();
+		Condition2.selfTest();
+		// condition2Test();
+		alarmTest();
+		communicatorTest();
+		boatTest();
 
-//		 new Condition2Test().simpleCondition2Test();
+		// schedulertest();
+
+		// new Condition2Test().simpleCondition2Test();
 		// new JoinTest().simpleJoinTest();
 		// selfTest_Alarm(1);
-//		new CommunicatorTest().commTest(1);
-		selftest_PriorityScheduler();
+		// new CommunicatorTest().commTest(1);
+		// selftest_PriorityScheduler();
 	}
 
 	public static void joinTest() {
 		Lib.debug(dbgThread, "Enter KThread.selfTest");
-		System.out.println("______join test begin_____");
-		final KThread thread1 = new KThread(new PingTest(1));
-		thread1.setName("forked thread").fork();
-		new KThread(new Runnable() {
-			public void run() {
-				thread1.join();
-				currentThread.yield();
-				System.out.println("successful");
+		// System.out.println("______join test1 begin_____");
+		// final KThread thread1 = new KThread(new PingTest(1));
+		// thread1.setName("forked thread").fork();
+		// new KThread(new Runnable() {
+		// public void run() {
+		// thread1.join();
+		// currentThread.yield();
+		// System.out.println("successful");
+		// }
+		// }).fork();
+
+		System.out.println("______join test2 begin_____");
+		for (int i = 0; i < 5; i++) {
+			System.out.println("*** thread 0 looped " + i + " times");
+			if (i == 2) {
+				KThread thread = new KThread(new PingTest(1));
+				thread.fork();
+				thread.join();
 			}
-		}).fork();
+			currentThread.yield();
+		}
 	}
 
 	public static void condition2Test() {// 检测Condition2是否工作正常
@@ -539,21 +551,21 @@ public class KThread {
 	}
 
 	public static void selfTest_Alarm(int numOfTest) {
-		Runnable a = new Runnable() {
-			public void run() {
-				AlarmTestThread();
-			}
-		};
-		for (int i = 0; i < numOfTest; i++) {
-			int numOfThreads = 5;
-			System.out.println("creating" + numOfThreads + "num of threads");
-			for (int j = 0; j < numOfThreads; j++) {
-				KThread thread = new KThread(a);
-				thread.setName("thread");
-				thread.fork();
-				ThreadedKernel.alarm.waitUntil(30000000);
-			}
-		}
+		// Runnable a = new Runnable() {
+		// public void run() {
+		// AlarmTestThread();
+		// }
+		// };
+		// for (int i = 0; i < numOfTest; i++) {
+		// int numOfThreads = 5;
+		// System.out.println("creating" + numOfThreads + "num of threads");
+		// for (int j = 0; j < numOfThreads; j++) {
+		// KThread thread = new KThread(a);
+		// thread.setName("thread");
+		// thread.fork();
+		// ThreadedKernel.alarm.waitUntil(30000000);
+		// }
+		// }
 	}
 
 	static void AlarmTestThread() {
@@ -587,25 +599,23 @@ public class KThread {
 		new KThread(new Runnable() {
 			public void run() {
 				communicator.speak(20);
-				System.out.println("thread1 successful");
+				System.out.println("thread1 send " + 20);
 			}
 		}).fork();
 		new KThread(new Runnable() {
 			public void run() {
 				communicator.speak(30);
-				System.out.println("thread2 successful");
+				System.out.println("thread2 send " + 30);
 			}
 		}).fork();
 		new KThread(new Runnable() {
 			public void run() {
-				System.out.println(communicator.listen());
-				System.out.println("thread3 successful");
+				System.out.println("thread3 receive " + communicator.listen());
 			}
 		}).fork();
 		new KThread(new Runnable() {
 			public void run() {
-				System.out.println(communicator.listen());
-				System.out.println("thread4 successful");
+				System.out.println("thread4 receive " + communicator.listen());
 			}
 		}).fork();
 	}
@@ -666,42 +676,75 @@ public class KThread {
 	}
 
 	public static void schedulertest() {
-		final KThread thread1 = new KThread(new Runnable() {
-			public void run() {
-				for (int i = 0; i < 3; i++) {
-					KThread.currentThread().yield();
-					System.out.println("thread1");
-				}
-			}
-		});
-		KThread thread2 = new KThread(new Runnable() {
-			public void run() {
-				for (int i = 0; i < 3; i++) {
-					KThread.currentThread().yield();
-					System.out.println("thread2");
-				}
-			}
-		});
-		KThread thread3 = new KThread(new Runnable() {
-			public void run() {
-				thread1.join();
-				for (int i = 0; i < 3; i++) {
-					KThread.currentThread().yield();
-					System.out.println("thread3");
-				}
-			}
-		});
+		// final KThread thread1 = new KThread(new Runnable() {
+		// public void run() {
+		// for (int i = 0; i < 3; i++) {
+		// KThread.currentThread().yield();
+		// System.out.println("thread1");
+		// }
+		// }
+		// });
+		// KThread thread2 = new KThread(new Runnable() {
+		// public void run() {
+		// for (int i = 0; i < 3; i++) {
+		// KThread.currentThread().yield();
+		// System.out.println("thread2");
+		// }
+		// }
+		// });
+		// KThread thread3 = new KThread(new Runnable() {
+		// public void run() {
+		// thread1.join();
+		// for (int i = 0; i < 3; i++) {
+		// KThread.currentThread().yield();
+		// System.out.println("thread3");
+		// }
+		// }
+		// });
+		// boolean status = Machine.interrupt().disable();
+		// ThreadedKernel.scheduler.setPriority(thread1, 2);
+		// ThreadedKernel.scheduler.setPriority(thread2, 4);
+		// ThreadedKernel.scheduler.setPriority(thread3, 6);
+		// thread1.setName("thread111");
+		// thread2.setName("thread2222");
+		// thread3.setName("thread33333");
+		// Machine.interrupt().restore(status);
+		// thread1.fork();
+		// thread2.fork();
+		// thread3.fork();
+
+		ThreadQueue tq1 = ThreadedKernel.scheduler.newThreadQueue(true);
+		KThread kthread1 = new KThread(), kthread2 = new KThread();
+
 		boolean status = Machine.interrupt().disable();
-		ThreadedKernel.scheduler.setPriority(thread1, 2);
-		ThreadedKernel.scheduler.setPriority(thread2, 4);
-		ThreadedKernel.scheduler.setPriority(thread3, 6);
-		thread1.setName("thread111");
-		thread2.setName("thread2222");
-		thread3.setName("thread33333");
+
+		tq1.waitForAccess(kthread1);
+		ThreadedKernel.scheduler.setPriority(kthread1, 6);
+
+		System.out
+				.println("EffectivePriority of kthread1 is:" + new PriorityScheduler().getEffectivePriority(kthread1));
+		System.out
+				.println("EffectivePriority of kthread2 is:" + new PriorityScheduler().getEffectivePriority(kthread2));
+
+		tq1.waitForAccess(kthread2);
+		System.out.println("kthread2 hold resource");
+		System.out
+				.println("EffectivePriority of kthread2 is:" + new PriorityScheduler().getEffectivePriority(kthread2));
+
+		KThread kthread3 = new KThread();
+		ThreadedKernel.scheduler.setPriority(kthread3, 7);
+		System.out
+				.println("EffectivePriority of kthread3 is:" + new PriorityScheduler().getEffectivePriority(kthread3));
+		tq1.waitForAccess(kthread3);
+		System.out.println("kthread2 hold resource");
+		System.out
+				.println("EffectivePriority of kthread2 is:" + new PriorityScheduler().getEffectivePriority(kthread2));
+
+		tq1.nextThread();
+		System.out.println("kthread2 finish");
+		System.out
+				.println("EffectivePriority of kthread2 is:" + new PriorityScheduler().getEffectivePriority(kthread2));
 		Machine.interrupt().restore(status);
-		thread1.fork();
-		thread2.fork();
-		thread3.fork();
 	}
 
 	private static final char dbgThread = 't';

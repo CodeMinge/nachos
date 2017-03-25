@@ -1,0 +1,4 @@
+对于proj2，我们是将coff文件加载进去运行，我们要设置的地方有三个：
+（1）eclipse参数
+（2）nachos.coff参数
+（3）建立nachos所需的工作目录，并且将我们编译的coff放入

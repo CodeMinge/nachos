@@ -476,20 +476,21 @@ public class KThread {
 		// new KThread(new PingTest(1)).setName("forked thread").fork();
 		// new PingTest(0).run();
 
-		joinTest();
-		Condition2.selfTest();
-		// condition2Test();
-		alarmTest();
-		communicatorTest();
-		boatTest();
+//		joinTest();
+//		Condition2.selfTest();
+//		 condition2Test();
+//		alarmTest();
+//		communicatorTest();
+//		boatTest();
 
-		// schedulertest();
+//		 schedulertest();
+		PriorityScheduler.selfTest();
 
 		// new Condition2Test().simpleCondition2Test();
 		// new JoinTest().simpleJoinTest();
 		// selfTest_Alarm(1);
 		// new CommunicatorTest().commTest(1);
-		// selftest_PriorityScheduler();
+//		 selftest_PriorityScheduler();
 	}
 
 	public static void joinTest() {
@@ -538,7 +539,7 @@ public class KThread {
 				lock.acquire();// 线程执行之前获得锁
 				KThread.currentThread().yield();
 				condition2.wake();
-				System.out.println("thread2 executing");
+				System.out.println("thread2 executing"); 
 				condition2.sleep();
 				lock.release();// 线程执行完毕将锁释放
 				System.out.println("thread2 execute successful");
@@ -676,42 +677,42 @@ public class KThread {
 	}
 
 	public static void schedulertest() {
-		// final KThread thread1 = new KThread(new Runnable() {
-		// public void run() {
-		// for (int i = 0; i < 3; i++) {
-		// KThread.currentThread().yield();
-		// System.out.println("thread1");
-		// }
-		// }
-		// });
-		// KThread thread2 = new KThread(new Runnable() {
-		// public void run() {
-		// for (int i = 0; i < 3; i++) {
-		// KThread.currentThread().yield();
-		// System.out.println("thread2");
-		// }
-		// }
-		// });
-		// KThread thread3 = new KThread(new Runnable() {
-		// public void run() {
-		// thread1.join();
-		// for (int i = 0; i < 3; i++) {
-		// KThread.currentThread().yield();
-		// System.out.println("thread3");
-		// }
-		// }
-		// });
-		// boolean status = Machine.interrupt().disable();
-		// ThreadedKernel.scheduler.setPriority(thread1, 2);
-		// ThreadedKernel.scheduler.setPriority(thread2, 4);
-		// ThreadedKernel.scheduler.setPriority(thread3, 6);
-		// thread1.setName("thread111");
-		// thread2.setName("thread2222");
-		// thread3.setName("thread33333");
-		// Machine.interrupt().restore(status);
-		// thread1.fork();
-		// thread2.fork();
-		// thread3.fork();
+//		 final KThread thread1 = new KThread(new Runnable() {
+//		 public void run() {
+//		 for (int i = 0; i < 3; i++) {
+//		 KThread.currentThread().yield();
+//		 System.out.println("thread1");
+//		 }
+//		 }
+//		 });
+//		 KThread thread2 = new KThread(new Runnable() {
+//		 public void run() {
+//		 for (int i = 0; i < 3; i++) {
+//		 KThread.currentThread().yield();
+//		 System.out.println("thread2");
+//		 }
+//		 }
+//		 });
+//		 KThread thread3 = new KThread(new Runnable() {
+//		 public void run() {
+//		 thread1.join();
+//		 for (int i = 0; i < 3; i++) {
+//		 KThread.currentThread().yield();
+//		 System.out.println("thread3");
+//		 }
+//		 }
+//		 });
+//		 boolean status = Machine.interrupt().disable();
+//		 ThreadedKernel.scheduler.setPriority(thread1, 2);
+//		 ThreadedKernel.scheduler.setPriority(thread2, 4);
+//		 ThreadedKernel.scheduler.setPriority(thread3, 6);
+//		 thread1.setName("thread111");
+//		 thread2.setName("thread2222");
+//		 thread3.setName("thread33333");
+//		 Machine.interrupt().restore(status);
+//		 thread1.fork();
+//		 thread2.fork();
+//		 thread3.fork();
 
 		ThreadQueue tq1 = ThreadedKernel.scheduler.newThreadQueue(true);
 		KThread kthread1 = new KThread(), kthread2 = new KThread();
@@ -722,14 +723,14 @@ public class KThread {
 		ThreadedKernel.scheduler.setPriority(kthread1, 6);
 
 		System.out
-				.println("EffectivePriority of kthread1 is:" + new PriorityScheduler().getEffectivePriority(kthread1));
+				.println("EffectivePriority of kthread1 is:" + ThreadedKernel.scheduler.getEffectivePriority(kthread1));
 		System.out
-				.println("EffectivePriority of kthread2 is:" + new PriorityScheduler().getEffectivePriority(kthread2));
+				.println("EffectivePriority of kthread2 is:" + ThreadedKernel.scheduler.getEffectivePriority(kthread2));
 
 		tq1.waitForAccess(kthread2);
 		System.out.println("kthread2 hold resource");
 		System.out
-				.println("EffectivePriority of kthread2 is:" + new PriorityScheduler().getEffectivePriority(kthread2));
+				.println("EffectivePriority of kthread2 is:" + ThreadedKernel.scheduler.getEffectivePriority(kthread2));
 
 		KThread kthread3 = new KThread();
 		ThreadedKernel.scheduler.setPriority(kthread3, 7);

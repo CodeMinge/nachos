@@ -37,7 +37,7 @@ public class Lock {
 
 		if (lockHolder != null) {
 			waitQueue.waitForAccess(thread);
-			KThread.sleep();                      //执行完这步，locker易主
+			KThread.sleep();                      //执行完这步，locker易主（线程睡眠不是易主原因）
 		} else {
 			waitQueue.acquire(thread);
 			lockHolder = thread;

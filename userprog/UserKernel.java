@@ -143,7 +143,7 @@ public class UserKernel extends ThreadedKernel {
 	/** Globally accessible reference to the synchronized console. */
 	public static SynchConsole console;
 
-	/**
+	/**从这个freePages的初始化就能知道，空闲页开始时与物理页数量是一致的
 	 * A set of free pages in this kernel
 	 */
 	private LinkedList<TranslationEntry> freePages = new LinkedList<TranslationEntry>();
@@ -153,6 +153,7 @@ public class UserKernel extends ThreadedKernel {
 	 */
 	private Lock freePagesLock;
 	
+	// 页不足异常
 	static class InadequatePagesException extends Exception {
 		/**
 		 * Something to make Eclipse stop complaining. 

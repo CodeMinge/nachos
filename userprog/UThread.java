@@ -28,6 +28,7 @@ public class UThread extends KThread {
 		process.initRegisters();
 		process.restoreState();
 
+		// 运行用户程序
 		Machine.processor().run();
 
 		Lib.assertNotReached();

@@ -159,28 +159,33 @@ public class UserProcess {
 	 * @return the number of bytes successfully transferred.
 	 */
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
-		Lib.assertTrue(offset >= 0 && length >= 0
-				&& offset + length <= data.length && memoryAccessLock != null);
-		if (!validAddress(vaddr)) {
+		Lib.assertTrue(offset >= 0 && length >= 0 && offset + length <= data.length);
+
+		byte[] memory = Machine.processor().getMemory();
+
+		int firstVPN = Processor.pageFromAddress(vaddr), firstOffset = Processor.offsetFromAddress(vaddr),
+				lastVPN = Processor.pageFromAddress(vaddr + length);
+
+		TranslationEntry entry = getTranslationEntry(firstVPN, false);
+
+		if (entry == null)
 			return 0;
-		} else {
-			Collection<MemoryAccess> memoryAccesses = createMemoryAccesses(
-					vaddr, data, offset, length, AccessType.READ);
 
-			int bytesRead = 0, temp;
+		int amount = Math.min(length, pageSize - firstOffset);
+		System.arraycopy(memory, Processor.makeAddress(entry.ppn, firstOffset), data, offset, amount);
+		offset += amount;
 
-			memoryAccessLock.acquire();
-			for (MemoryAccess ma : memoryAccesses) {
-				temp = ma.executeAccess();
-
-				if (temp == 0)
-					break;
-				else
-					bytesRead += temp;
-			}
-			memoryAccessLock.release();
-			return bytesRead;
+		for (int i = firstVPN + 1; i <= lastVPN; i++) {
+			entry = getTranslationEntry(i, false);
+			if (entry == null)
+				return amount;
+			int len = Math.min(length - amount, pageSize);
+			System.arraycopy(memory, Processor.makeAddress(entry.ppn, 0), data, offset, len);
+			offset += len;
+			amount += len;
 		}
+
+		return amount;
 	}
 
 	/**
@@ -216,27 +221,33 @@ public class UserProcess {
 	 * @return the number of bytes successfully transferred.
 	 */
 	public int writeVirtualMemory(int vaddr, byte[] data, int offset, int length) {
-		Lib.assertTrue(offset >= 0 && length >= 0
-				&& offset + length <= data.length && memoryAccessLock != null);
-		if (!validAddress(vaddr)) {
+		Lib.assertTrue(offset >= 0 && length >= 0 && offset + length <= data.length);
+
+		byte[] memory = Machine.processor().getMemory();
+
+		int firstVPN = Processor.pageFromAddress(vaddr), firstOffset = Processor.offsetFromAddress(vaddr),
+				lastVPN = Processor.pageFromAddress(vaddr + length);
+
+		TranslationEntry entry = getTranslationEntry(firstVPN, true);
+
+		if (entry == null)
 			return 0;
-		} else {
-			Collection<MemoryAccess> memoryAccesses = createMemoryAccesses(
-					vaddr, data, offset, length, AccessType.WRITE);
 
-			int bytesWritten = 0, temp;
-			memoryAccessLock.acquire();
-			for (MemoryAccess ma : memoryAccesses) {
-				temp = ma.executeAccess();
-				if (temp == 0)
-					break;
-				else
-					bytesWritten += temp;
-			}
-			memoryAccessLock.release();
+		int amount = Math.min(length, pageSize - firstOffset);
+		System.arraycopy(data, offset, memory, Processor.makeAddress(entry.ppn, firstOffset), amount);
+		offset += amount;
 
-			return bytesWritten;
+		for (int i = firstVPN + 1; i <= lastVPN; i++) {
+			entry = getTranslationEntry(i, true);
+			if (entry == null)
+				return amount;
+			int len = Math.min(length - amount, pageSize);
+			System.arraycopy(data, offset, memory, Processor.makeAddress(entry.ppn, 0), len);
+			offset += len;
+			amount += len;
 		}
+
+		return amount;
 	}
 
 	/**
@@ -272,6 +283,20 @@ public class UserProcess {
 		}
 
 		return returnList;
+	}
+	
+	protected TranslationEntry getTranslationEntry(int vpn, boolean isWrite) {
+		if (vpn < 0 || vpn >= numPages)
+			return null;
+		TranslationEntry result = pageTable[vpn];
+		if (result == null)
+			return null;
+		if (result.readOnly && isWrite)
+			return null;
+		result.used = true;
+		if (isWrite)
+			result.dirty = true;
+		return result;
 	}
 
 	/**
@@ -380,7 +405,7 @@ public class UserProcess {
 	protected boolean load(String name, String[] args) {
 		Lib.debug(dbgProcess, "UserProcess.load(\"" + name + "\")");
 
-		OpenFile executable = ThreadedKernel.fileSystem.open(name, false);
+		OpenFile executable = ThreadedKernel.fileSystem.open(name, false); //用OpenFile类打开文件
 		if (executable == null) {
 			Lib.debug(dbgProcess, "\topen failed");
 			return false;
@@ -394,6 +419,7 @@ public class UserProcess {
 			return false;
 		}
 
+		// 计算需要的页数，包括文件、栈、参数
 		// make sure the sections are contiguous and start at page 0
 		numPages = 0;
 		for (int s = 0; s < coff.getNumSections(); s++) {
@@ -430,6 +456,7 @@ public class UserProcess {
 		// and finally reserve 1 page for arguments
 		numPages++;
 
+		// 创建用户空间的pagetable，指示了虚拟页与物理页的对应关系 
 		if (!loadSections())
 			return false;
 
@@ -471,11 +498,12 @@ public class UserProcess {
 	 */
 	protected boolean loadSections() {
 		try {
-			pageTable = ((UserKernel) Kernel.kernel).acquirePages(numPages);
+			pageTable = ((UserKernel) Kernel.kernel).acquirePages(numPages); 
 
-			for (int i = 0; i < pageTable.length; i++)
+			for (int i = 0; i < pageTable.length; i++) //用户进程的空间就是所申请页数，虚拟内存总是从0开始
 				pageTable[i].vpn = i;
 
+			// 将所有虚拟页的内容写到物理页中
 			for (int sectionNumber = 0; sectionNumber < coff.getNumSections(); sectionNumber++) {
 				CoffSection section = coff.getSection(sectionNumber);
 
@@ -508,7 +536,7 @@ public class UserProcess {
 		}
 	}
 
-	/**
+	/** 初始化用户空间中的各种寄存器
 	 * Initialize the processor's registers in preparation for running the
 	 * program loaded into this process. Set the PC register to point at the
 	 * start function, set the stack pointer register to point at the top of the
@@ -787,7 +815,7 @@ public class UserProcess {
 	 *            exception
 	 * @return Irrelevant - user process never sees this syscall return
 	 */
-	private int handleExit(Integer status) {
+	public int handleExit(Integer status) {
 		joinLock.acquire();
 
 		// Attempt to inform our parent that we're exiting
@@ -1162,8 +1190,9 @@ public class UserProcess {
 	/** Lock to protect static variables */
 	private static Lock sharedStateLock = new Lock();
 
-	/** Process ID */
 	private static int nextPID = 0;
+	
+	/** Process ID */
 	protected int PID;
 
 	/** Parent/Child process tree */
